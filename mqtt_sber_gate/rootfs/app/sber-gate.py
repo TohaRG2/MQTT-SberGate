@@ -799,13 +799,13 @@ def GetCategory():
       Categories={}
       SD_Categories = requests.get(Options['sber-http_api_endpoint']+'/v1/mqtt-gate/categories', headers=hds,auth=(Options['sber-mqtt_login'], Options['sber-mqtt_password'])).json()
       for id in SD_Categories['categories']:
-         log('Получаем опции для котегории: '+id)
+         log('Получаем опции для котегории!!!: '+id)
          SD_Features = requests.get(Options['sber-http_api_endpoint']+'/v1/mqtt-gate/categories/'+id+'/features', headers=hds,auth=(Options['sber-mqtt_login'], Options['sber-mqtt_password'])).json()
          Categories[id]=SD_Features['features']
    #   log(Categories)
       json_write('categories.json',Categories)
    else:
-      log('Список категорий получен из файла: ' + fCategories)
+      log('Список категорий получен из файла!!!: ' + fCategories)
       Categories=json_read(fCategories)
    return Categories
 
