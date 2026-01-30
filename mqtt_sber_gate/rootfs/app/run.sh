@@ -1,12 +1,19 @@
 #!/usr/bin/with-contenv bashio
 
-# Если в /data есть новая версия файла, копируем её в /app
-if [ -f /data/sber-gate.py ]; then
-    echo "Found /data/sber-gate.py, copying to /app..."
-    cp /data/sber-gate.py /app/sber-gate.py
+CUSTOM_FILE="/share/sber-gate.py"
+APP_FILE="/app/sber-gate.py"
+
+# Если в /share есть кастомный файл — подменяем
+if [ -f "$CUSTOM_FILE" ]; then
+    echo "Custom $CUSTOM_FILE found, copying to $APP_FILE ..."
+    cp "$CUSTOM_FILE" "$APP_FILE"
+else
+    echo "No custom script in /share, using built-in version"
 fi
 
 # запуск скрипта
 while true; do
-    python3 /app/sber-gate.py
+    python3 "$APP_FILE"
+    echo "Script stopped. Restarting in 2s..."
+    sleep 2
 done
