@@ -74,9 +74,9 @@ agent_status_report = {
     "online": True, 
     "error": "", 
     "credentials": {
-        'username': OPTIONS['sber-mqtt_login'], 
+        'username': OPTIONS.get('sber-mqtt_login', 'UNKNOWN'), 
         "password": "***",
-        'broker': OPTIONS['sber-mqtt_broker']
+        'broker': OPTIONS.get('sber-mqtt_broker', 'UNKNOWN')
     }
 }
 

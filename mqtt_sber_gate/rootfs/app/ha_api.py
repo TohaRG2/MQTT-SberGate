@@ -14,8 +14,9 @@ class HAClient:
         self.websocket_client = None
 
     def get_api_headers(self):
+        token = self.config_options.get('ha-api_token', '')
         return {
-            'Authorization': f"Bearer {self.config_options['ha-api_token']}",
+            'Authorization': f"Bearer {token}",
             'content-type': 'application/json'
         }
 
@@ -24,7 +25,8 @@ class HAClient:
         entity_domain, _ = entity_id.split('.', 1)
         log(f"Отправляем команду в HA для {entity_id} ON: {is_on}")
         
-        base_url = f"{self.config_options['ha-api_url']}/api/services/{entity_domain}/"
+        api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
+        base_url = f"{api_url}/api/services/{entity_domain}/"
         if entity_domain == 'button':
             url = base_url + 'press'
         else:
@@ -36,7 +38,8 @@ class HAClient:
     def set_climate_temperature(self, entity_id, changes):
         entity_domain, _ = entity_id.split('.', 1)
         log(f"Отправляем команду в HA для {entity_id} Climate: ")
-        url = f"{self.config_options['ha-api_url']}/api/services/{entity_domain}/set_temperature"
+        api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
+        url = f"{api_url}/api/services/{entity_domain}/set_temperature"
         log(f"HA REST API REQUEST: {url}")
         
         target_temp = self.device_database.get_state(entity_id, 'hvac_temp_set')
@@ -52,13 +55,15 @@ class HAClient:
     def toggle_switch_state(self, entity_id, should_turn_on):
         log(f"Отправляем команду в HA для {entity_id} ON: {should_turn_on}")
         service = 'turn_on' if should_turn_on else 'turn_off'
-        url = f"{self.config_options['ha-api_url']}/api/services/switch/{service}"
+        api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
+        url = f"{api_url}/api/services/switch/{service}"
         requests.post(url, json={"entity_id": entity_id}, headers=self.get_api_headers())
 
     def execute_script(self, entity_id, should_turn_on):
         log(f"Отправляем команду в HA для {entity_id} ON: {should_turn_on}")
         service = 'turn_on' if should_turn_on else 'turn_off'
-        url = f"{self.config_options['ha-api_url']}/api/services/script/{service}"
+        api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
+        url = f"{api_url}/api/services/script/{service}"
         requests.post(url, json={"entity_id": entity_id}, headers=self.get_api_headers())
 
     # Entity update helpers
@@ -152,8 +157,9 @@ class HAClient:
         pass
 
     def initialize_entities_via_rest(self):
-        url = f"{self.config_options['ha-api_url']}/api/states"
-        log(f"Подключаемся к HA, (ha-api_url: {self.config_options['ha-api_url']})", 3)
+        api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
+        url = f"{api_url}/api/states"
+        log(f"Подключаемся к HA, (ha-api_url: {api_url})", 3)
         
         attempt = 0
         response = None
@@ -217,9 +223,10 @@ class HAClient:
 
     def handle_auth_required(self, ws, message_data):
         log("WebSocket: auth_required")
+        token = self.config_options.get('ha-api_token', '')
         ws.send(json.dumps({
             "type": "auth",
-            "access_token": self.config_options['ha-api_token']
+            "access_token": token
         }))
 
     def handle_auth_ok(self, ws, message_data):
@@ -324,7 +331,8 @@ class HAClient:
         log("WebSocket: default")
 
     def run_websocket_client(self):
-        ws_url = self.config_options['ha-api_url'].replace('http', 'ws', 1) + '/api/websocket'
+        api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
+        ws_url = api_url.replace('http', 'ws', 1) + '/api/websocket'
         log(f"Start WebSocket Client URL: {ws_url}")
         
         self.websocket_client = websocket.WebSocketApp(

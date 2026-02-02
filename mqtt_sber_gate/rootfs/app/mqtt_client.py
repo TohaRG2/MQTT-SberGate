@@ -12,7 +12,10 @@ class SberMQTTClient:
         self.mqtt_client = mqtt.Client()
         
         # SberDevice MQTT Topic Structure
-        self.sber_user_login = self.config_options['sber-mqtt_login']
+        self.sber_user_login = self.config_options.get('sber-mqtt_login', 'UNKNOWN_USER')
+        if self.sber_user_login == 'UNKNOWN_USER':
+            log("CRITICAL ERROR: 'sber-mqtt_login' is missing in configuration!", 6)
+            
         self.root_topic = f"sberdevices/v1/{self.sber_user_login}"
         self.downlink_topic = f"{self.root_topic}/down"
         self.uplink_topic = f"{self.root_topic}/up"
@@ -135,20 +138,28 @@ class SberMQTTClient:
         self.mqtt_client.message_callback_add(f"{self.downlink_topic}/config_request", self.handle_config_request)
 
         # Authentication and TLS
-        self.mqtt_client.username_pw_set(
-            self.config_options['sber-mqtt_login'], 
-            self.config_options['sber-mqtt_password']
-        )
+        mqtt_user = self.config_options.get('sber-mqtt_login', '')
+        mqtt_pass = self.config_options.get('sber-mqtt_password', '')
+        
+        if mqtt_user and mqtt_pass:
+            self.mqtt_client.username_pw_set(mqtt_user, mqtt_pass)
+        else:
+            log("WARNING: MQTT credentials missing in config!", 5)
+            
         # Sber uses self-signed or specific certs, disable verification if requested
         self.mqtt_client.tls_set(certfile=None, keyfile=None, cert_reqs=ssl.CERT_NONE, tls_version=None)
         self.mqtt_client.tls_insecure_set(True)
 
     def start(self):
-        broker_host = self.config_options['sber-mqtt_broker']
-        broker_port = self.config_options['sber-mqtt_broker_port']
+        broker_host = self.config_options.get('sber-mqtt_broker', 'mqtt.sberdevices.ru')
+        broker_port = self.config_options.get('sber-mqtt_broker_port', 8883)
         log(f"Connecting to Sber MQTT Broker: {broker_host}:{broker_port}")
-        self.mqtt_client.connect(broker_host, broker_port, keepalive=60)
-        self.mqtt_client.loop_start()
+        
+        try:
+            self.mqtt_client.connect(broker_host, broker_port, keepalive=60)
+            self.mqtt_client.loop_start()
+        except Exception as e:
+            log(f"CRITICAL ERROR: Failed to connect to Sber MQTT: {e}", 6)
 
     def publish_config(self):
         config_payload = self.device_database.do_mqtt_json_devices_list()

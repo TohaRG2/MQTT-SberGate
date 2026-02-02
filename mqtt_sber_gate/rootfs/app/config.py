@@ -4,19 +4,28 @@ from logger import log
 
 VERSION = '1.0.17'
 base_dir = os.path.dirname(os.path.abspath(__file__))
-OPTIONS_FILE_PATH = os.path.join(base_dir, 'options.json')
-DEVICES_DB_FILE_PATH = os.path.join(base_dir, 'devices.json')
-CATEGORIES_FILE_PATH = os.path.join(base_dir, 'categories.json')
+
+# В Home Assistant конфигурация аддона (options.json) всегда находится в /data
+# Остальные файлы (devices.json) также лучше хранить в /data для персистентности
+if os.path.exists('/data'):
+    DATA_DIR = '/data'
+else:
+    DATA_DIR = base_dir
+
+OPTIONS_FILE_PATH = os.path.join(DATA_DIR, 'options.json')
+DEVICES_DB_FILE_PATH = os.path.join(DATA_DIR, 'devices.json')
+CATEGORIES_FILE_PATH = os.path.join(DATA_DIR, 'categories.json')
 
 OPTIONS = {}
 
 def read_json_file(file_path):
     try:
-        data = open(file_path, 'r', encoding='utf-8').read()
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = f.read()
         result = json.loads(data)
-    except:
+    except Exception as e:
         result = {}
-        log('!!! Неверная конфигурация в файле: ' + file_path)
+        log(f'!!! Ошибка чтения или разбора файла {file_path}: {e}')
     return result
 
 def write_json_file(file_path, data):
