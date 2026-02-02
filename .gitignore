@@ -2,3 +2,4 @@
 /mqtt_sber_gate/rootfs/app/*.log
 .idea/*
 */__pycache__/*
+/.gigaide/*
