@@ -37,17 +37,6 @@ if not os.path.exists(DEVICES_DB_FILE_PATH):
 log('Loading device database from devices.json', 3)
 device_db_manager = CDevicesDB(DEVICES_DB_FILE_PATH)
 
-# Текущий статус агента
-agent_status_report = {
-    "online": True, 
-    "error": "", 
-    "credentials": {
-        'username': OPTIONS['sber-mqtt_login'], 
-        "password": "***",
-        'broker': OPTIONS['sber-mqtt_broker']
-    }
-}
-
 # Инициализация MQTT клиента Сбера
 sber_mqtt_handler = SberMQTTClient(device_db_manager, OPTIONS)
 
@@ -79,6 +68,17 @@ sber_api.init_categories()
 
 # Публикация конфигурации устройств в MQTT
 sber_mqtt_handler.publish_config()
+
+# Текущий статус агента
+agent_status_report = {
+    "online": True, 
+    "error": "", 
+    "credentials": {
+        'username': OPTIONS['sber-mqtt_login'], 
+        "password": "***",
+        'broker': OPTIONS['sber-mqtt_broker']
+    }
+}
 
 # Запуск веб-сервера для управления и мониторинга
 api_web_server = WebServer(device_db_manager, sber_mqtt_handler, OPTIONS, agent_status_report)
