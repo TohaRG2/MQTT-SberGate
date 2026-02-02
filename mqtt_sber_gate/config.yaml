@@ -23,7 +23,7 @@ ports_description:
 
 options:
   ha-api_url: "http://ha_server_ip:8123"
-  ha-api_token: ""
+  ha-api_token: "длинная такая строка, скопировать из настроек HA"
   sber-mqtt_broker: "mqtt-partners.iot.sberdevices.ru"
   sber-mqtt_broker_port: 8883
   sber-mqtt_login: "mqtt-sber-login"

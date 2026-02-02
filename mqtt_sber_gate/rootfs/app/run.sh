@@ -1,19 +1,19 @@
 #!/usr/bin/with-contenv bashio
 
-CUSTOM_FILE="/share/sber-gate.py"
-APP_FILE="/app/sber-gate.py"
+CUSTOM_DIR="/share"
+APP_DIR="/app"
 
-# Если в /share есть кастомный файл — подменяем
-if [ -f "$CUSTOM_FILE" ]; then
-    echo "Custom $CUSTOM_FILE found, copying to $APP_FILE ..."
-    cp "$CUSTOM_FILE" "$APP_FILE"
+# Копируем все Python-файлы из /share в /app, если они есть
+if ls "$CUSTOM_DIR"/*.py >/dev/null 2>&1; then
+    echo "Найдены кастомные .py файлы в $CUSTOM_DIR. Копирование в $APP_DIR..."
+    cp "$CUSTOM_DIR"/*.py "$APP_DIR"/
 else
-    echo "No custom script in /share, using built-in version"
+    echo "Нет кастомных .py файлов в $CUSTOM_DIR, используем встроенные версии"
 fi
 
-# запуск скрипта
+# Запуск основного скрипта
 while true; do
-    python3 "$APP_FILE"
-    echo "Script stopped. Restarting in 2s..."
+    python3 "$APP_DIR/sber-gate.py"
+    echo "Скрипт остановлен. Перезапуск через 2 секунды..."
     sleep 2
 done
