@@ -19,4 +19,4 @@ COPY rootfs /
 
 RUN chmod a+x /app/run.sh
 
-CMD [ "/app/run.sh" ]
+CMD [ "/bin/sh","/app/run.sh" ]

@@ -51,6 +51,7 @@ def get_category():
                     endpoint + '/v1/mqtt-gate/categories/' + id + '/features', headers=get_sber_headers(),
                     auth=get_sber_auth()).json()
                 Categories[id] = SD_Features['features']
+
             write_json_file(CATEGORIES_FILE_PATH, Categories)
         except Exception as e:
             log('Error fetching categories: ' + str(e))

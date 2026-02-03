@@ -105,7 +105,16 @@ class HAClient:
                 'entity_ha': True,
                 'entity_type': 'sensor_temp',
                 'friendly_name': friendly_name,
-                'category': 'sensor_temp'
+                'category': 'sensor_temp',
+                'device_class': device_class
+            })
+        elif device_class == 'humidity':
+            self.device_database.update(entity_id, {
+                'entity_ha': True,
+                'entity_type': 'sensor_temp',
+                'friendly_name': friendly_name,
+                'category': 'sensor_temp',
+                'device_class': device_class
             })
 
     def update_button_entity(self, entity_id, state_data):
@@ -193,11 +202,43 @@ class HAClient:
             'hvac_radiator': self.update_hvac_radiator_entity
         }
 
+        # Шаг 1: Инициализируем все сущности
         for entity in ha_entities:
             entity_id = entity['entity_id']
             entity_type, _ = entity_id.split('.', 1)
             handler = update_handlers.get(entity_type, self.update_default_entity)
             handler(entity_id, entity)
+        
+        # Шаг 2: Объединяем значения температуры и влажности для датчиков с одним device_id
+        # Сначала собираем только датчики температуры и влажности
+        sensor_temp_devices = {}
+        for entity in ha_entities:
+            entity_id = entity['entity_id']
+            db_entity = self.device_database.DB.get(entity_id)
+            if db_entity and db_entity.get('category') == 'sensor_temp':
+                device_class = entity['attributes'].get('device_class', '')
+                if device_class in ['temperature', 'humidity']:
+                    device_id = db_entity.get('device_id')
+                    if device_id:
+                        if device_id not in sensor_temp_devices:
+                            sensor_temp_devices[device_id] = []
+                        sensor_temp_devices[device_id].append(entity_id)
+        
+        # Теперь для каждого device_id объединяем значения
+        for device_id, entity_ids in sensor_temp_devices.items():
+            if len(entity_ids) > 1:
+                # Собираем все доступные значения температуры и влажности
+                combined_states = {}
+                for entity_id in entity_ids:
+                    states = self.device_database.get_states(entity_id)
+                    for key, value in states.items():
+                        if key in ['temperature', 'humidity']:
+                            combined_states[key] = value
+                
+                # Обновляем все датчики с этим device_id значениями из combined_states
+                for entity_id in entity_ids:
+                    for key, value in combined_states.items():
+                        self.device_database.change_state(entity_id, key, value)
 
     # WebSocket methods
     def on_websocket_open(self, ws):
@@ -280,9 +321,16 @@ class HAClient:
                 room_name = self.areas_registry.get(area_id, '') if area_id else ''
                 current_room_in_db = db_entity.get('room')
 
+                # Обновляем device_id устройства
+                if device_id != db_entity.get('device_id'):
+                    self.device_database.update(entity_id, {
+                        'entity_ha': True,
+                        'device_id': device_id
+                    })
+
                 if current_room_in_db != room_name:
                     log(f"Изменилось расположение сущности {entity_id} с {current_room_in_db} на {room_name}")
-                    self.device_database.update_only(entity_id, {
+                    self.device_database.update(entity_id, {
                         'entity_ha': True,
                         'room': room_name
                     })
@@ -298,34 +346,80 @@ class HAClient:
         # Debug logging for a specific sensor if needed
         if 'sensor.temperatura_kabinet' in entity_id:
             log(f"ANY Event: {entity_id}: {old_state} -> {new_state}")
-            
-        if device_entry and device_entry.get('enabled'):
-            log(f"HA Event: {entity_id}: {old_state} -> {new_state}", 3)
-            
-            if device_entry['category'] == 'sensor_temp':
-                try:
-                    self.device_database.change_state(entity_id, 'temperature', float(new_state))
-                except (ValueError, TypeError):
-                    pass
-            
-            if new_state == 'on':
-                self.device_database.change_state(entity_id, 'on_off', True)
-                if 'button_event' in device_entry['States']:
-                    device_entry['States']['button_event'] = 'click'
+            log(f"DEBUG: device_entry: {device_entry}")
+            if device_entry:
+                log(f"DEBUG: device_entry.enabled: {device_entry.get('enabled')}")
+                log(f"DEBUG: device_entry.category: {device_entry.get('category')}")
+                log(f"DEBUG: device_entry.device_class: {device_entry.get('device_class')}")
             else:
-                if device_entry['entity_type'] == 'climate':
-                    is_active = new_state != 'off'
-                    self.device_database.change_state(entity_id, 'on_off', is_active)
-                else:
-                    self.device_database.change_state(entity_id, 'on_off', False)
-                
-                if 'button_event' in device_entry['States']:
-                    device_entry['States']['button_event'] = 'double_click'
+                log(f"DEBUG: device_entry not found in database")
             
-            # Send status update to Sber
-            if self.publish_status_callback:
-                status_payload = self.device_database.do_mqtt_json_states_list([entity_id])
-                self.publish_status_callback(status_payload)
+        if device_entry:
+            device_class = event_data['new_state']['attributes'].get('device_class', '')
+            current_device_id = device_entry.get('device_id')
+            is_enabled = device_entry.get('enabled', False)
+            
+            # Обновляем состояние текущего датчика (даже если он выключен)
+            if device_entry['category'] == 'sensor_temp':
+                if device_class in ['temperature', 'humidity']:
+                    try:
+                        value = float(new_state)
+                        key = 'temperature' if device_class == 'temperature' else 'humidity'
+                        
+                        # Обновляем состояние текущего датчика
+                        self.device_database.change_state(entity_id, key, value)
+                        
+                        # Синхронизируем значение во всех датчиках температуры и влажности с тем же device_id
+                        if current_device_id:
+                            for other_entity_id, other_device in self.device_database.DB.items():
+                                if (other_device.get('device_id') == current_device_id and 
+                                    other_entity_id != entity_id and 
+                                    other_device.get('category') == 'sensor_temp' and
+                                    other_device.get('device_class') in ['temperature', 'humidity']):
+                                    self.device_database.change_state(other_entity_id, key, value)
+                        
+                        # Логируем и отправляем обновление в Sber только если устройство включено
+                        if is_enabled:
+                            log(f"HA Event: {entity_id}: {old_state} -> {new_state}", 3)
+                            
+                            # Send status update to Sber для всех связанных включенных датчиков
+                            if self.publish_status_callback:
+                                if current_device_id:
+                                    # Собираем все включенные entity_id с тем же device_id
+                                    related_entities = [e_id for e_id, dev in self.device_database.DB.items() 
+                                                      if dev.get('device_id') == current_device_id and dev.get('enabled')]
+                                    if related_entities:
+                                        status_payload = self.device_database.do_mqtt_json_states_list(related_entities)
+                                        self.publish_status_callback(status_payload)
+                                else:
+                                    # Если нет device_id, отправляем только для текущего устройства
+                                    status_payload = self.device_database.do_mqtt_json_states_list([entity_id])
+                                    self.publish_status_callback(status_payload)
+                    except (ValueError, TypeError):
+                        pass
+            else:
+                # Обработка других типов устройств (только если они включены)
+                if is_enabled:
+                    log(f"HA Event: {entity_id}: {old_state} -> {new_state}", 3)
+                    
+                    if new_state == 'on':
+                        self.device_database.change_state(entity_id, 'on_off', True)
+                        if 'button_event' in device_entry['States']:
+                            device_entry['States']['button_event'] = 'click'
+                    else:
+                        if device_entry['entity_type'] == 'climate':
+                            is_active = new_state != 'off'
+                            self.device_database.change_state(entity_id, 'on_off', is_active)
+                        else:
+                            self.device_database.change_state(entity_id, 'on_off', False)
+                        
+                        if 'button_event' in device_entry['States']:
+                            device_entry['States']['button_event'] = 'double_click'
+                    
+                    # Send status update to Sber
+                    if self.publish_status_callback:
+                        status_payload = self.device_database.do_mqtt_json_states_list([entity_id])
+                        self.publish_status_callback(status_payload)
 
     def handle_websocket_default(self, ws, message_data):
         log("WebSocket: default")

@@ -127,9 +127,13 @@ class CDevicesDB(object):
             r.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
             r.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": v}})
         if d['category'] == 'sensor_temp':
-            v = round(s.get('temperature', 0) * 10)
             r.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
-            r.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": v}})
+            if 'temperature' in s:
+                v = round(s.get('temperature', 0) * 10)
+                r.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": v}})
+            if 'humidity' in s:
+                v = round(s.get('humidity', 0))
+                r.append({'key': 'humidity', 'value': {"type": "INTEGER", "integer_value": v}})
 
         if d['category'] == 'scenario_button':
             v = s.get('button_event', 'click')
@@ -168,7 +172,7 @@ class CDevicesDB(object):
     def do_mqtt_json_devices_list(self):
         dev = {'devices': []}
         dev['devices'].append({"id": "root", "name": "Вумный контроллер", 'hw_version': VERSION, 'sw_version': VERSION})
-        dev['devices'][0]['model'] = {'id': 'ID_root_hub', 'manufacturer': 'Janch', 'model': 'VHub',
+        dev['devices'][0]['model'] = {'id': 'ID_root_hub', 'manufacturer': 'TM', 'model': 'VHub',
                                       'description': "HA MQTT SberGate HUB", 'category': 'hub', 'features': ['online']}
         for k, v in self.DB.items():
             if v.get('enabled', False):
@@ -192,7 +196,7 @@ class CDevicesDB(object):
                                 if ft['name'] == st:
                                     f.append(ft['name'])
 
-                d['model'] = {'id': 'ID_' + dev_cat, 'manufacturer': 'Janch', 'model': 'Model_' + dev_cat,
+                d['model'] = {'id': 'ID_' + dev_cat, 'manufacturer': 'TM', 'model': 'Model_' + dev_cat,
                               'category': dev_cat, 'features': f}
                 #            log(d['model'])
                 d['model_id'] = ''

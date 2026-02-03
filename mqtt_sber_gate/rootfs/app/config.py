@@ -2,7 +2,7 @@ import json
 import os
 from logger import log
 
-VERSION = '1.0.17'
+VERSION = '2.0.1'
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 # В Home Assistant конфигурация аддона (options.json) всегда находится в /data
@@ -39,9 +39,9 @@ def load_options():
 
 def update_option(key, value):
     current_value = OPTIONS.get(key, None)
-    if (current_value is None):
+    if current_value is None:
         log('В настройках отсутствует параметр: ' + key + ' (добавляю.)')
-    if (current_value != value):
+    if current_value != value:
         OPTIONS[key] = value
         log('В настройках изменился параметр: ' + key + ' с ' + str(current_value) + ' на ' + str(value) + ' (обновляю и сохраняю).')
         write_json_file(OPTIONS_FILE_PATH, OPTIONS)

@@ -86,7 +86,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 {"id": "root_device", "manufacturer": "MQTT", "model": "MQTT Root Device", "description": "Root device model", "features": ["online"], "category": "hub"},
                 {"id": "ID_1", "manufacturer": "Я", "model": "Моя модель", "hw_version": "1", "sw_version": "1", "description": "Моя модель", "features": ["online", "on_off"], "category": "relay"},
                 {"id": "temp_device", "manufacturer": "tempDev", "model": "Термометр", "hw_version": "1", "sw_version": "1", "description": "Датчик температуры", "features": ["on_off", "online"], "category": "relay"},
-                {"id": "ID_2", "manufacturer": "Я", "model": "Датчик температуры", "hw_version": "v1", "sw_version": "v1", "description": "Датчик температуры", "features": ["online", "temperature"], "category": "sensor_temp", "allowed_values": {"temperature": {"type": "INTEGER", "integer_values": {"min": "-400", "max": "2000"}}}}
+                {"id": "ID_2", "manufacturer": "Я", "model": "Датчик температуры", "hw_version": "v1", "sw_version": "v1", "description": "Датчик температуры", "features": ["online", "temperature"], "category": "sensor_temp", "allowed_values": {"temperature": {"type": "INTEGER", "integer_values": {"min": "-400", "max": "2000"}}}},
+                {"id": "ID_3", "manufacturer": "Я", "model": "Датчик влажности", "hw_version": "v1", "sw_version": "v1", "description": "Датчик влажности", "features": ["online", "humidity"], "category": "sensor_temp", "allowed_values": {"humidity": {"type": "INTEGER", "integer_values": {"min": "0", "max": "1000"}}}}
             ]
         }
         self.send_json_response(models_data)
