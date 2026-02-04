@@ -2,7 +2,7 @@ import json
 import os
 from logger import log
 
-VERSION = '2.0.1'
+VERSION = '2.0.2'
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 # В Home Assistant конфигурация аддона (options.json) всегда находится в /data

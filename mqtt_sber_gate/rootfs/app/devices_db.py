@@ -134,6 +134,9 @@ class CDevicesDB(object):
             if 'humidity' in s:
                 v = round(s.get('humidity', 0))
                 r.append({'key': 'humidity', 'value': {"type": "INTEGER", "integer_value": v}})
+            if 'air_pressure' in s:
+                v = round(s.get('air_pressure', 0))
+                r.append({'key': 'air_pressure', 'value': {"type": "INTEGER", "integer_value": v}})
 
         if d['category'] == 'scenario_button':
             v = s.get('button_event', 'click')
