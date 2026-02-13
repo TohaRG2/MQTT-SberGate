@@ -18,7 +18,7 @@ def fetch_models():
         log('Файл моделей отсутствует. Получаем...')
         endpoint = OPTIONS.get('sber-http_api_endpoint')
         if not endpoint:
-            log('sber-http_api_endpoint is missing')
+            log('sber-http_api_endpoint отсутствует')
             return
             
         try:
@@ -29,7 +29,7 @@ def fetch_models():
             else:
                 log('ОШИБКА! Запрос models завершился с ошибкой: ' + str(SD_Models.status_code))
         except Exception as e:
-            log('Exception fetching models: ' + str(e))
+            log('Исключение при получении моделей: ' + str(e))
 
 def get_category():
     global Categories
@@ -37,7 +37,7 @@ def get_category():
     
     if not os.path.exists(CATEGORIES_FILE_PATH):
         if not endpoint:
-            log('sber-http_api_endpoint is missing, cannot fetch categories')
+            log('sber-http_api_endpoint отсутствует, получение категорий невозможно')
             return {}
 
         log('Файл категорий отсутствует. Получаем...')
@@ -46,7 +46,7 @@ def get_category():
             SD_Categories = requests.get(endpoint + '/v1/mqtt-gate/categories', headers=get_sber_headers(),
                                          auth=get_sber_auth()).json()
             for id in SD_Categories['categories']:
-                log('Получаем опции для котегории!!!: ' + id)
+                log('Получаем опции для категории: ' + id)
                 SD_Features = requests.get(
                     endpoint + '/v1/mqtt-gate/categories/' + id + '/features', headers=get_sber_headers(),
                     auth=get_sber_auth()).json()
@@ -54,10 +54,10 @@ def get_category():
 
             write_json_file(CATEGORIES_FILE_PATH, Categories)
         except Exception as e:
-            log('Error fetching categories: ' + str(e))
+            log('Ошибка при получении категорий: ' + str(e))
             return {}
     else:
-        log('Список категорий получен из файла!!!: ' + CATEGORIES_FILE_PATH)
+        log('Список категорий получен из файла: ' + CATEGORIES_FILE_PATH)
         Categories = read_json_file(CATEGORIES_FILE_PATH)
     return Categories
 

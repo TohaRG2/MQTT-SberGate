@@ -4,301 +4,356 @@ from config import read_json_file, write_json_file, VERSION
 import sber_api
 
 class CDevicesDB(object):
-    """docstring"""
+    """
+    Менеджер локальной базы данных устройств, обрабатывающий сопоставление сущностей
+    Home Assistant и категорий/состояний SberDevice.
+    """
 
-    def __init__(self, f):
-        """Constructor 'devices.json'"""
-        self.fDB = f
-        self.DB = read_json_file(f)
-        for id in self.DB:
-            if self.DB[id].get('enabled', None) is None:
-                self.DB[id]['enabled'] = False
+    def __init__(self, db_file_path):
+        """Инициализация базы данных из файла и настройка начального состояния."""
+        self.db_file_path = db_file_path
+        self.devices_registry = read_json_file(db_file_path)
+        
+        # Убеждаемся, что у всех устройств есть флаг 'enabled'
+        for entity_id in self.devices_registry:
+            if self.devices_registry[entity_id].get('enabled') is None:
+                self.devices_registry[entity_id]['enabled'] = False
 
         self.mqtt_json_devices_list = '{}'
         self.mqtt_json_states_list = '{}'
         self.http_json_devices_list = '{}'
-        #      self.do_mqtt_json_devices_list()
-        #      self.do_mqtt_json_states_list({})
+        
         self.do_http_json_devices_list()
 
-    def new_id(self, a):
-        r = ''
+    def generate_new_id(self, prefix):
+        """Генерация уникального ID с заданным префиксом."""
         for i in range(1, 99):
-            r = a + '_' + ('00' + str(i))[-2:]
-            if self.DB.get(r, None) is None:
-                return r
+            new_id = f"{prefix}_{str(i).zfill(2)}"
+            if self.devices_registry.get(new_id) is None:
+                return new_id
         return None
 
     def save_db(self):
-        write_json_file(self.fDB, self.DB)
-    #      self.do_http_json_devices_list()
+        """Сохранение текущей базы данных на диск."""
+        write_json_file(self.db_file_path, self.devices_registry)
 
-    def clear(self, d):
-        self.DB = {}
+    def clear_database(self):
+        """Удаление всех устройств из базы данных."""
+        self.devices_registry = {}
         self.save_db()
 
-    def dev_add(self):
-        print('device_Add')
+    def delete_device(self, entity_id):
+        """Удаление устройства из базы данных."""
+        if entity_id in self.devices_registry:
+            self.devices_registry.pop(entity_id)
+            self.save_db()
+            log(f"Удалено устройство: {entity_id}!")
 
-    def dev_del(self, id):
-        self.DB.pop(id, None)
-        self.save_db()
-        log('Delete Device: ' + id + '!')
+    def is_device_in_base(self, entity_id):
+        """Проверка существования устройства в базе данных."""
+        return entity_id in self.devices_registry
 
-    def dev_in_base(self, id):
-        if self.DB.get(id, None) is None:
-            return False
-        else:
-            return True
-
-    def change_state(self, id, key, value):
-        if self.DB.get(id, None) is None:
-            log('Device id=' + str(id) + ' not found')
+    def change_state(self, entity_id, state_key, value):
+        """Обновление состояния конкретного атрибута устройства."""
+        if entity_id not in self.devices_registry:
+            log(f"Устройство id={entity_id} не найдено")
             return
-        if self.DB[id].get('States', None) is None:
-            log('Device id=' + str(id) + ' States not Found. Create.')
-            self.DB[id]['States'] = {}
-        if self.DB[id]['States'].get(key, None) is None:
-            log('Device id=' + str(id) + ' key=' + str(key) + ' not Found. Create.')
-        self.DB[id]['States'][key] = value
+            
+        device = self.devices_registry[entity_id]
+        if 'States' not in device:
+            log(f"Для устройства id={entity_id} не найдены состояния (States). Создаем.")
+            device['States'] = {}
+            
+        if state_key not in device['States']:
+            log(f"Для устройства id={entity_id} ключ={state_key} не найден. Создаем.")
+            
+        device['States'][state_key] = value
 
-    #      self.do_mqtt_json_states_list([id])
+    def get_states(self, entity_id):
+        """Возвращает все состояния для конкретного устройства."""
+        device = self.devices_registry.get(entity_id, {})
+        return device.get('States', {})
 
-    def get_states(self, id):
-        d = self.DB.get(id, {})
-        return d.get('States', {})
+    def get_state(self, entity_id, state_key):
+        """Возвращает значение конкретного состояния устройства."""
+        device = self.devices_registry.get(entity_id, {})
+        states = device.get('States', {})
+        return states.get(state_key)
 
-    def get_state(self, id, key):
-        d = self.DB.get(id, {})
-        s = d.get('States', {})
-        return s.get(key, None)
-
-    def update_only(self, device_id, attributes):
-        if self.DB.get(device_id) is not None:
+    def update_device_attributes(self, entity_id, attributes):
+        """Обновление нескольких атрибутов существующего устройства."""
+        if entity_id in self.devices_registry:
             for key, value in attributes.items():
-                self.DB[device_id][key] = value
+                self.devices_registry[entity_id][key] = value
             self.save_db()
 
-    def update(self, updated_id, d):
-        # задаем дефолтные значения для полей записи в базе
-        fl = {'enabled': False,
-              'name': '',
-              'default_name': '',
-              'nicknames': [],
-              'home': '',
-              'room': '',
-              'groups': [],
-              'model_id': '',
-              'category': '',
-              'hw_version': 'hw:' + VERSION,
-              'sw_version': 'sw:' + VERSION,
-              'entity_ha': False,
-              'entity_type': '',
-              'friendly_name': ''}
-        if self.DB.get(updated_id, None) is None:
-            log('Device ' + updated_id + ' Not Found. Adding')
-            self.DB[updated_id] = {}
-            for k, v in fl.items():
-                self.DB[updated_id][k] = d.get(k, v)
-            if d['category'] == 'scenario_button':
-                self.DB[updated_id]['States'] = {'button_event': ''}
+    def update(self, entity_id, data):
+        """Обновление или создание записи устройства с предоставленными данными и значениями по умолчанию."""
+        default_attributes = {
+            'enabled': False,
+            'name': '',
+            'default_name': '',
+            'nicknames': [],
+            'home': '',
+            'room': '',
+            'groups': [],
+            'model_id': '',
+            'category': '',
+            'hw_version': f'hw:{VERSION}',
+            'sw_version': f'sw:{VERSION}',
+            'entity_ha': False,
+            'entity_type': '',
+            'friendly_name': ''
+        }
+        
+        if entity_id not in self.devices_registry:
+            log(f"Устройство {entity_id} не найдено. Добавляем новую запись.")
+            self.devices_registry[entity_id] = {}
+            for key, default_val in default_attributes.items():
+                self.devices_registry[entity_id][key] = data.get(key, default_val)
+                
+            if data.get('category') == 'scenario_button':
+                self.devices_registry[entity_id]['States'] = {'button_event': ''}
 
-        for k, v in d.items():
-            self.DB[updated_id][k] = d.get(k, v)
-        if self.DB[updated_id]['name'] == '':
-            self.DB[updated_id]['name'] = self.DB[updated_id]['friendly_name']
+        # Обновление новыми данными
+        for key, value in data.items():
+            self.devices_registry[entity_id][key] = value
+            
+        # Убеждаемся, что имя не пустое
+        if not self.devices_registry[entity_id].get('name'):
+            self.devices_registry[entity_id]['name'] = self.devices_registry[entity_id].get('friendly_name', '')
+            
         self.save_db()
 
-    def device_states_mqtt_sber(self, id):
-        d = self.DB.get(id, None)
-        #      log(d)
-        r = []
-        if d is None:
-            log('Запрошен несуществующий объект: ' + id)
-            return r
-        s = d.get('States', None)
-        if s is None:
-            log('У объекта: ' + id + 'отсутствует информация о состояниях')
-            return r
-        if d['category'] == 'relay':
-            v = s.get('on_off', False)
-            r.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
-            r.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": v}})
-        if d['category'] == 'sensor_temp':
-            r.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
-            if 'temperature' in s:
-                v = round(s.get('temperature', 0) * 10)
-                r.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": v}})
-            if 'humidity' in s:
-                v = round(s.get('humidity', 0))
-                r.append({'key': 'humidity', 'value': {"type": "INTEGER", "integer_value": v}})
-            if 'air_pressure' in s:
-                v = round(s.get('air_pressure', 0))
-                r.append({'key': 'air_pressure', 'value': {"type": "INTEGER", "integer_value": v}})
+    def get_sber_formatted_states(self, entity_id):
+        """
+        Устаревший метод для форматирования состояний для Sber MQTT.
+        Рекомендуется использовать do_mqtt_json_states_list для динамического форматирования.
+        """
+        device = self.devices_registry.get(entity_id)
+        if not device:
+            log(f"Запрошен несуществующий объект: {entity_id}")
+            return []
+            
+        states = device.get('States')
+        if states is None:
+            log(f"У объекта {entity_id} отсутствует информация о состояниях")
+            return []
+            
+        category = device.get('category')
+        result_states = []
+        
+        # Всегда добавляем статус online
+        result_states.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
+        
+        if category == 'relay':
+            is_on = states.get('on_off', False)
+            result_states.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": is_on}})
+            
+        elif category == 'sensor_temp':
+            if 'temperature' in states:
+                temp_val = round(states.get('temperature', 0) * 10)
+                result_states.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": temp_val}})
+            if 'humidity' in states:
+                hum_val = round(states.get('humidity', 0))
+                result_states.append({'key': 'humidity', 'value': {"type": "INTEGER", "integer_value": hum_val}})
+            if 'air_pressure' in states:
+                press_val = round(states.get('air_pressure', 0))
+                result_states.append({'key': 'air_pressure', 'value': {"type": "INTEGER", "integer_value": press_val}})
 
-        if d['category'] == 'scenario_button':
-            v = s.get('button_event', 'click')
-            r.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
-            r.append({'key': 'button_event', 'value': {"type": "ENUM", "enum_value": v}})
+        elif category == 'scenario_button':
+            event = states.get('button_event', 'click')
+            result_states.append({'key': 'button_event', 'value': {"type": "ENUM", "enum_value": event}})
 
-        if d['category'] == 'hvac_ac':
-            v = round(s.get('temperature', 20) * 10)
-            vv = round(s.get('hvac_temp_set', 20) * 10)
-            r.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
-            r.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": True}})
-            r.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": v}})
-            r.append({'key': 'hvac_temp_set', 'value': {"type": "INTEGER", "integer_value": vv}})
+        elif category == 'hvac_ac':
+            temp = round(states.get('temperature', 20) * 10)
+            target = round(states.get('hvac_temp_set', 20) * 10)
+            result_states.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": True}})
+            result_states.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": temp}})
+            result_states.append({'key': 'hvac_temp_set', 'value': {"type": "INTEGER", "integer_value": target}})
 
-        if d['category'] == 'hvac_radiator':
-            #         log('hvac')
-            v = round(s.get('temperature', 0) * 10)
-            r.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
-            r.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": True}})
-            r.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": v}})
-            r.append({'key': 'hvac_temp_set', 'value': {"type": "INTEGER", "integer_value": 30}})
-        #         log(r)
-
-        #      for k,v in s.items():
-        #         log(k)
-        #         if (isinstance(v,bool)):
-        #            o={'key':k,'value':{"type": "BOOL", "bool_value": v}}
-        #         elif (isinstance(v, int)):
-        #            o={'key':k,'value':{"type": "INTEGER", "integer_value": v}}
-        #         else:
-        #            log(v)
-        #            o={'key':k,'value':{"type": "BOOL", "bool_value": False}}
-        #         r.append(o)
-        return r
+        elif category == 'hvac_radiator':
+            temp = round(states.get('temperature', 0) * 10)
+            result_states.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": True}})
+            result_states.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": temp}})
+            result_states.append({'key': 'hvac_temp_set', 'value': {"type": "INTEGER", "integer_value": 30}})
+            
+        return result_states
 
     def do_mqtt_json_devices_list(self):
-        dev = {'devices': []}
-        dev['devices'].append({"id": "root", "name": "Вумный контроллер", 'hw_version': VERSION, 'sw_version': VERSION})
-        dev['devices'][0]['model'] = {'id': 'ID_root_hub', 'manufacturer': 'TM', 'model': 'VHub',
-                                      'description': "HA MQTT SberGate HUB", 'category': 'hub', 'features': ['online']}
-        for k, v in self.DB.items():
-            if v.get('enabled', False):
-                d = {'id': k, 'name': v.get('name', ''), 'default_name': v.get('default_name', '')}
-                d['home'] = v.get('home', 'Мой дом')
-                d['room'] = v.get('room', '')
-                #            d['groups']=['Спальня']
-                d['hw_version'] = v.get('hw_version', '')
-                d['sw_version'] = v.get('sw_version', '')
-                dev_cat = v.get('category', 'relay')
+        """Генерация JSON для публикации конфигурации устройств в Sber MQTT."""
+        payload = {'devices': []}
+        
+        # Добавляем корневой хаб
+        payload['devices'].append({
+            "id": "root", 
+            "name": "Вумный контроллер", 
+            'hw_version': VERSION, 
+            'sw_version': VERSION,
+            'model': {
+                'id': 'ID_root_hub', 
+                'manufacturer': 'TM', 
+                'model': 'VHub',
+                'description': "HA MQTT SberGate HUB", 
+                'category': 'hub', 
+                'features': ['online']
+            }
+        })
+        
+        for entity_id, device in self.devices_registry.items():
+            if device.get('enabled', False):
+                dev_entry = {
+                    'id': entity_id, 
+                    'name': device.get('name', ''), 
+                    'default_name': device.get('default_name', ''),
+                    'home': device.get('home', 'Мой дом'),
+                    'room': device.get('room', ''),
+                    'hw_version': device.get('hw_version', ''),
+                    'sw_version': device.get('sw_version', '')
+                }
                 
-                c = sber_api.Categories.get(dev_cat)
+                category = device.get('category', 'relay')
+                category_features = sber_api.Categories.get(category)
                 
-                f = []
-                if c:
-                    for ft in c:
-                        if ft.get('required', False):
-                            f.append(ft['name'])
+                active_features = []
+                if category_features:
+                    for feature in category_features:
+                        feature_name = feature['name']
+                        if feature.get('required', False):
+                            active_features.append(feature_name)
                         else:
-                            for st in self.get_states(k):
-                                if ft['name'] == st:
-                                    f.append(ft['name'])
+                            # Добавляем необязательные функции, если они есть в текущих состояниях
+                            if feature_name in self.get_states(entity_id):
+                                active_features.append(feature_name)
 
-                d['model'] = {'id': 'ID_' + dev_cat, 'manufacturer': 'TM', 'model': 'Model_' + dev_cat,
-                              'category': dev_cat, 'features': f}
-                #            log(d['model'])
-                d['model_id'] = ''
-                dev['devices'].append(d)
-        self.mqtt_json_devices_list = json.dumps(dev)
-        log('New Devices List for MQTT: ' + self.mqtt_json_devices_list, 1)
+                dev_entry['model'] = {
+                    'id': f'ID_{category}', 
+                    'manufacturer': 'TM', 
+                    'model': f'Model_{category}',
+                    'category': category, 
+                    'features': active_features
+                }
+                dev_entry['model_id'] = ''
+                payload['devices'].append(dev_entry)
+                
+        self.mqtt_json_devices_list = json.dumps(payload)
+        log(f'Новый список устройств для MQTT: {self.mqtt_json_devices_list}', 1)
         return self.mqtt_json_devices_list
 
-    def default_value(self, feature):
-        t = feature['data_type']
-        dv_dict = {
+    def get_default_value_for_feature(self, feature):
+        """Возвращает значение по умолчанию на основе типа данных Сбера."""
+        data_type = feature['data_type']
+        default_values_by_type = {
             'BOOL': False,
             'INTEGER': 0,
             'ENUM': ''
         }
-        v = dv_dict.get(t, None)
-        if v is None:
-            log('Неизвестный тип даных: ' + t)
+        
+        value = default_values_by_type.get(data_type)
+        if value is None:
+            log(f'Неизвестный тип данных: {data_type}')
             return False
-        else:
-            if feature['name'] == 'online':
-                return True
-            else:
-                return v
+            
+        if feature['name'] == 'online':
+            return True
+        return value
 
-    def state_value(self, id, feature):
-        # {'key':'online','value':{"type": "BOOL", "bool_value": True}}
-        State = self.DB[id]['States'][feature['name']]
-        if feature['name'] == 'temperature':
-            State = State * 10
-        if feature['data_type'] == 'BOOL':
-            r = {'key': feature['name'], 'value': {'type': 'BOOL', 'bool_value': bool(State)}}
-        if feature['data_type'] == 'INTEGER':
-            r = {'key': feature['name'], 'value': {'type': 'INTEGER', 'integer_value': int(State)}}
-        if feature['data_type'] == 'ENUM':
-            r = {'key': feature['name'], 'value': {'type': 'ENUM', 'enum_value': State}}
-        log(id + ': ' + str(r), 0)
-        return r
+    def format_state_for_sber(self, entity_id, feature):
+        """Форматирование одного значения состояния для полезной нагрузки Sber MQTT."""
+        feature_name = feature['name']
+        state_value = self.devices_registry[entity_id]['States'][feature_name]
+        data_type = feature['data_type']
+        
+        # Сбер ожидает температуру, умноженную на 10
+        if feature_name == 'temperature':
+            state_value = state_value * 10
+            
+        result = {'key': feature_name, 'value': {'type': data_type}}
+        
+        if data_type == 'BOOL':
+            result['value']['bool_value'] = bool(state_value)
+        elif data_type == 'INTEGER':
+            result['value']['integer_value'] = int(state_value)
+        elif data_type == 'ENUM':
+            result['value']['enum_value'] = state_value
+            
+        log(f"{entity_id}: {result}", 0)
+        return result
 
-    def do_mqtt_json_states_list(self, dl):
-        d_stat = {'devices': {}}
-        if len(dl) == 0:
-            dl = self.DB.keys()
-        for id in dl:
-            device = self.DB.get(id, None)
-            if not (device is None):
-                if device['enabled']:
-                    device_category = device.get('category', None)
-                    if device_category is None:
-                        device_category = 'relay'
-                        self.DB[id]['category'] = device_category
-                    d_stat['devices'][id] = {}
-                    features = sber_api.Categories.get(device_category)
-                    if features:
-                        if self.DB[id].get('States', None) is None:
-                            self.DB[id]['States'] = {}
-                        r = []
-                        for ft in features:
-                            state_value = self.DB[id]['States'].get(ft['name'], None)
-                            if state_value is None:
-                                if ft.get('required', False):
-                                    log('отсутствует обязательное состояние сущности: ' + ft['name'])
-                                    self.DB[id]['States'][ft['name']] = self.default_value(ft)
-                            if not (self.DB[id]['States'].get(ft['name'], None) is None):
-                                r.append(self.state_value(id, ft))
-                                if ft['name'] == 'button_event':
-                                    self.DB[id]['States']['button_event'] = ''
-                        d_stat['devices'][id]['states'] = r
-        #               if (s is None):
-        #                  log('У объекта: '+id+'отсутствует информация о состояниях')
-        #                  self.DB[id]['States']={}
-        #                  self.DB[id]['States']['online']=True
-        #               DStat['devices'][id]['states']=self.DeviceStates_mqttSber(id)
+    def do_mqtt_json_states_list(self, entity_id_list):
+        """Генерация JSON для обновлений состояния в Sber MQTT."""
+        states_payload = {'devices': {}}
+        
+        if not entity_id_list:
+            entity_id_list = list(self.devices_registry.keys())
+            
+        for entity_id in entity_id_list:
+            device = self.devices_registry.get(entity_id)
+            if device and device.get('enabled'):
+                category = device.get('category', 'relay')
+                if not device.get('category'):
+                    device['category'] = category
+                    
+                states_payload['devices'][entity_id] = {}
+                features = sber_api.Categories.get(category)
+                
+                if features:
+                    if 'States' not in device:
+                        device['States'] = {}
+                        
+                    formatted_states = []
+                    for feature in features:
+                        feature_name = feature['name']
+                        current_val = device['States'].get(feature_name)
+                        
+                        # Обработка отсутствующих обязательных состояний
+                        if current_val is None:
+                            if feature.get('required', False):
+                                log(f'Отсутствует обязательное состояние: {feature_name}')
+                                device['States'][feature_name] = self.get_default_value_for_feature(feature)
+                                
+                        # Добавляем только если значение существует (теперь инициализировано, если обязательно)
+                        if device['States'].get(feature_name) is not None:
+                            formatted_states.append(self.format_state_for_sber(entity_id, feature))
+                            
+                            # Сброс событий кнопок после отправки
+                            if feature_name == 'button_event':
+                                device['States']['button_event'] = ''
+                                
+                    states_payload['devices'][entity_id]['states'] = formatted_states
 
-        if len(d_stat['devices']) == 0:
-            d_stat['devices'] = {"root": {"states": [{"key": "online", "value": {"type": "BOOL", "bool_value": True}}]}}
-        self.mqtt_json_states_list = json.dumps(d_stat)
-        log(f"Отправка состояний в Sber: {self.mqtt_json_states_list}", 1)
+        # Возврат к статусу online корневого хаба, если устройства не сообщаются
+        if not states_payload['devices']:
+            states_payload['devices'] = {
+                "root": {"states": [{"key": "online", "value": {"type": "BOOL", "bool_value": True}}]}
+            }
+            
+        self.mqtt_json_states_list = json.dumps(states_payload)
+        log(f"Отправка состояний в Сбер: {self.mqtt_json_states_list}", 1)
         return self.mqtt_json_states_list
 
     def do_http_json_devices_list(self):
-        Dev = {}
-        Dev['devices'] = []
-        x = []
-        for k, v in self.DB.items():
-            r = {}
-            r['id'] = k
-            r['name'] = v.get('name', '')
-            r['default_name'] = v.get('default_name', '')
-            r['nicknames'] = v.get('nicknames', [])
-            r['home'] = v.get('home', '')
-            r['room'] = v.get('room', '')
-            r['groups'] = v.get('groops', [])
-            r['model_id'] = v['model_id']
-            r['category'] = v.get('category', '')
-            r['hw_version'] = v.get('hw_version', '')
-            r['sw_version'] = v.get('sw_version', '')
-            x.append(r)
-            Dev['devices'].append(r)
-        self.http_json_devices_list = json.dumps({'devices': x})
+        """Генерация упрощенного списка устройств для UI/HTTP API."""
+        device_list = []
+        for entity_id, device in self.devices_registry.items():
+            device_info = {
+                'id': entity_id,
+                'name': device.get('name', ''),
+                'default_name': device.get('default_name', ''),
+                'nicknames': device.get('nicknames', []),
+                'home': device.get('home', ''),
+                'room': device.get('room', ''),
+                'groups': device.get('groups', []),
+                'model_id': device.get('model_id', ''),
+                'category': device.get('category', ''),
+                'hw_version': device.get('hw_version', ''),
+                'sw_version': device.get('sw_version', '')
+            }
+            device_list.append(device_info)
+            
+        self.http_json_devices_list = json.dumps({'devices': device_list})
         return self.http_json_devices_list
 
-    def do_http_json_devices_list_2(self):
-        return json.dumps({'devices': self.DB})
+    def do_http_json_devices_list_full(self):
+        """Возвращает всю базу данных в формате JSON."""
+        return json.dumps({'devices': self.devices_registry})

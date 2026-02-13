@@ -46,5 +46,5 @@ def update_option(key, value):
         log('В настройках изменился параметр: ' + key + ' с ' + str(current_value) + ' на ' + str(value) + ' (обновляю и сохраняю).')
         write_json_file(OPTIONS_FILE_PATH, OPTIONS)
 
-# Auto-load options on import
+# Автоматическая загрузка настроек при импорте
 load_options()

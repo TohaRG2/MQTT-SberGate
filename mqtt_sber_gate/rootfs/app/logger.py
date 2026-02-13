@@ -5,7 +5,7 @@ LOG_LEVEL_LIST = {'deeptrace': 0, 'trace': 1, 'debug': 2, 'info': 3, 'notice': 4
 LOG_FILE = 'SberGate.log'
 LOG_FILE_MAX_SIZE = 1024 * 1024 * 7
 
-# Global log level, default to 0 (deeptrace) but will be updated
+# Глобальный уровень логирования, по умолчанию 0 (deeptrace), будет обновлен
 log_level = 0
 
 def set_log_level(level_name):

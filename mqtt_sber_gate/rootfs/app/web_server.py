@@ -63,27 +63,27 @@ class RequestHandler(BaseHTTPRequestHandler):
             with open(file_path, 'rb') as f:
                 self.wfile.write(f.read())
         except Exception as e:
-            log(f"Error reading file {file_path}: {e}")
+            log(f"Ошибка чтения файла {file_path}: {e}")
 
     def handle_root(self):
         self.send_response(200)
         self.send_header("Content-type", "text/html")
         self.end_headers()
         self.wfile.write(bytes(
-            '<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Интеграция с умным домом Сбер</title></head><body>',
+            '<!doctype html><html lang="ru"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Интеграция с умным домом Сбер</title></head><body>',
             "utf-8"))
         self.wfile.write(bytes('<h1>Управление устройствами</h1> <p><a href="index.html">Сбер Агент</a></p>', "utf-8"))
         self.wfile.write(bytes('<h1>Список устройств:</h1> <br>', "utf-8"))
-        for entity_id in self.device_database.DB:
-            device_name = self.device_database.DB[entity_id]['name']
+        for entity_id in self.device_database.devices_registry:
+            device_name = self.device_database.devices_registry[entity_id]['name']
             self.wfile.write(bytes(f"{entity_id}:{device_name}<br>", "utf-8"))
         self.wfile.write(bytes('</body></html>', "utf-8"))
 
     def handle_api_models(self):
-        # TODO: Move this hardcoded list to a configuration file
+        # TODO: Переместить этот захардкоженный список в файл конфигурации
         models_data = {
             "models": [
-                {"id": "root_device", "manufacturer": "MQTT", "model": "MQTT Root Device", "description": "Root device model", "features": ["online"], "category": "hub"},
+                {"id": "root_device", "manufacturer": "MQTT", "model": "MQTT Root Device", "description": "Модель корневого устройства", "features": ["online"], "category": "hub"},
                 {"id": "ID_1", "manufacturer": "Я", "model": "Моя модель", "hw_version": "1", "sw_version": "1", "description": "Моя модель", "features": ["online", "on_off"], "category": "relay"},
                 {"id": "temp_device", "manufacturer": "tempDev", "model": "Термометр", "hw_version": "1", "sw_version": "1", "description": "Датчик температуры", "features": ["on_off", "online"], "category": "relay"},
                 {"id": "ID_2", "manufacturer": "Я", "model": "Датчик температуры", "hw_version": "v1", "sw_version": "v1", "description": "Датчик температуры", "features": ["online", "temperature"], "category": "sensor_temp", "allowed_values": {"temperature": {"type": "INTEGER", "integer_values": {"min": "-400", "max": "2000"}}}},
@@ -96,20 +96,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_text_response(self.device_database.do_http_json_devices_list(), "application/json")
 
     def handle_api_devices_post(self, post_data):
-        log(f"SberAgent adding new device: {post_data}")
+        log(f"Сбер Агент добавляет новое устройство: {post_data}")
         category = post_data.get('category', '')
         if category:
-            new_id = self.device_database.new_id(category)
-            self.device_database.DB[new_id] = {}
+            new_id = self.device_database.generate_new_id(category)
+            self.device_database.devices_registry[new_id] = {}
             self.device_database.update(new_id, post_data)
             self.device_database.save_db()
             self.mqtt_client.publish_config()
 
     def handle_api_v2_devices_post(self, post_data):
-        log(f"Updating devices data: {post_data['devices']}")
+        log(f"Обновление данных устройств: {post_data['devices']}")
         for device_entry in post_data['devices']:
             for entity_id, properties in device_entry.items():
-                log(f"Updating {entity_id}: {properties}")
+                log(f"Обновление {entity_id}: {properties}")
                 self.device_database.update(entity_id, properties)
         self.mqtt_client.publish_config()
         self.device_database.save_db()
@@ -117,26 +117,26 @@ class RequestHandler(BaseHTTPRequestHandler):
     def handle_api_v2_command_post(self, post_data):
         command = post_data.get('command', 'unknown')
         if command == 'DB_delete':
-            log("Database deletion requested")
-            self.device_database.clear(post_data)
+            log("Запрошено удаление базы данных")
+            self.device_database.clear_database()
         elif command == 'exit':
-            log("Server shutdown requested")
+            log("Запрошена остановка сервера")
             sys.exit()
         else:
-            log(f"Received unknown command: {post_data}")
+            log(f"Получена неизвестная команда: {post_data}")
 
     def handle_api_v2_devices_get(self):
-        self.send_text_response(self.device_database.do_http_json_devices_list_2(), "application/json")
+        self.send_text_response(self.device_database.do_http_json_devices_list_full(), "application/json")
 
     def handle_api_status(self):
         self.send_json_response(self.agent_status_data)
 
     def handle_api_categories(self):
-        log('Requesting categories')
+        log('Запрос категорий')
         self.send_json_response(sber_api.resCategories)
 
     def handle_api_proxy_v1(self):
-        # Proxy request to Sber HTTP API
+        # Проксирование запроса к HTTP API Сбера
         api_prefix = '/api/v1/'
         log(f"PROXY {api_prefix}: {self.path}")
         
@@ -149,17 +149,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             if response.status_code == 200:
                 self.send_text_response(response.text, "application/json")
             else:
-                log(f"PROXY ERROR! Request {target_url} failed with status: {response.status_code}")
+                log(f"ОШИБКА ПРОКСИ! Запрос {target_url} завершился с кодом: {response.status_code}")
         except Exception as e:
-            log(f"PROXY Exception: {e}")
+            log(f"Исключение ПРОКСИ: {e}")
 
     def do_DELETE(self):
         self.send_json_response({})
         api_prefix = '/api/v1/devices/'
         if self.path.startswith(api_prefix):
             entity_id = self.path[len(api_prefix):]
-            log(f"DELETE device: {entity_id}")
-            self.device_database.dev_del(entity_id)
+            log(f"УДАЛЕНИЕ устройства: {entity_id}")
+            self.device_database.delete_device(entity_id)
             self.mqtt_client.publish_config()
 
     def do_GET(self):
@@ -170,11 +170,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             # Строим полный путь относительно директории приложения
             full_path = os.path.join(APP_DIR, static_file_path)
-            log(f"Serving file: {full_path} (MIME: {mime_type})")
+            log(f"Отдача файла: {full_path} (MIME: {mime_type})")
             self.send_static_file(full_path, f"{mime_type}; charset=utf-8")
             return
 
-        # API Routing
+        # Маршрутизация API
         routes = {
             '/': self.handle_root,
             '/api/v1/status': self.handle_api_status,
@@ -190,7 +190,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.path.startswith('/api/v1/'):
             self.handle_api_proxy_v1()
         else:
-            self.send_text_response(f"Request: {self.path}", "text/html")
+            self.send_text_response(f"Запрос: {self.path}", "text/html")
 
     def do_PUT(self):
         self.send_json_response({})
@@ -221,7 +221,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if handler:
             handler(post_data)
         else:
-            log(f"Unknown POST request: {post_data}")
+            log(f"Неизвестный POST запрос: {post_data}")
 
 class WebServer:
     def __init__(self, device_db, mqtt_client, config_options, agent_status):
@@ -241,7 +241,7 @@ class WebServer:
         RequestHandler.agent_status_data = self.agent_status
         
         self.server = HTTPServer((self.host_name, self.server_port), RequestHandler)
-        log(f"Web server started at http://{self.host_name or 'localhost'}:{self.server_port}")
+        log(f"Веб-сервер запущен на http://{self.host_name or 'localhost'}:{self.server_port}")
         
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.daemon = True
@@ -251,4 +251,4 @@ class WebServer:
         if self.server:
             self.server.shutdown()
             self.server.server_close()
-            log("Web server stopped.")
+            log("Веб-сервер остановлен.")
