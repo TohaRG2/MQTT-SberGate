@@ -71,9 +71,7 @@ class CDevicesDB(object):
     def get_state(self, id, key):
         d = self.DB.get(id, {})
         s = d.get('States', {})
-        k = s.get(key, None)
-        if k:
-            return k
+        return s.get(key, None)
 
     def update_only(self, device_id, attributes):
         if self.DB.get(device_id) is not None:

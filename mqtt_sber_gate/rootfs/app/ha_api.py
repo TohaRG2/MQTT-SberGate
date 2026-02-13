@@ -27,13 +27,28 @@ class HAClient:
         
         api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
         base_url = f"{api_url}/api/services/{entity_domain}/"
+        
+        payload = {"entity_id": entity_id}
+        
         if entity_domain == 'button':
             url = base_url + 'press'
         else:
-            url = base_url + ('turn_on' if is_on else 'turn_off')
+            service = 'turn_on' if is_on else 'turn_off'
+            url = base_url + service
             
-        log(f"HA REST API REQUEST: {url}")
-        requests.post(url, json={"entity_id": entity_id}, headers=self.get_api_headers())
+            # Если это лампа и она включается, проверяем наличие яркости в БД
+            if entity_domain == 'light' and is_on:
+                brightness_sber = self.device_database.get_state(entity_id, 'light_brightness')
+                if brightness_sber is not None:
+                    # Конвертируем из диапазона Сбера (50-1000) обратно в HA (0-255)
+                    # Используем формулу: ha = (sber - 50) * 255 / 950
+                    ha_brightness = round(((float(brightness_sber) - 50) / 950.0) * 255)
+                    ha_brightness = max(0, min(255, ha_brightness))
+                    payload['brightness'] = ha_brightness
+                    log(f"Добавляем яркость в команду HA для {entity_id}: Sber:{brightness_sber} -> HA:{ha_brightness}")
+            
+        log(f"HA REST API REQUEST: {url} Payload: {payload}")
+        requests.post(url, json=payload, headers=self.get_api_headers())
 
     def set_climate_temperature(self, entity_id, changes):
         entity_domain, _ = entity_id.split('.', 1)
@@ -76,6 +91,8 @@ class HAClient:
             'friendly_name': friendly_name,
             'category': 'relay'
         })
+        is_on = state_data.get('state') == 'on'
+        self.device_database.change_state(entity_id, 'on_off', is_on)
 
     def update_light_entity(self, entity_id, state_data):
         friendly_name = state_data['attributes'].get('friendly_name', '')
@@ -86,6 +103,15 @@ class HAClient:
             'friendly_name': friendly_name,
             'category': 'light'
         })
+        is_on = state_data.get('state') == 'on'
+        self.device_database.change_state(entity_id, 'on_off', is_on)
+        
+        brightness = state_data['attributes'].get('brightness')
+        if brightness is not None:
+            # Конвертируем из HA (0-255) в диапазон Сбера (50-1000)
+            # Формула: sber = 50 + (ha * 950 / 255)
+            sber_brightness = round(50 + (float(brightness) / 255.0) * 950)
+            self.device_database.change_state(entity_id, 'light_brightness', sber_brightness)
 
     def update_script_entity(self, entity_id, state_data):
         friendly_name = state_data['attributes'].get('friendly_name', '')
@@ -96,6 +122,8 @@ class HAClient:
             'friendly_name': friendly_name,
             'category': 'relay'
         })
+        is_on = state_data.get('state') == 'on'
+        self.device_database.change_state(entity_id, 'on_off', is_on)
 
     def update_sensor_entity(self, entity_id, state_data):
         device_class = state_data['attributes'].get('device_class', '')
@@ -416,18 +444,25 @@ class HAClient:
                 if is_enabled:
                     log(f"HA Event: {entity_id}: {old_state} -> {new_state}", 3)
                     
-                    if new_state == 'on':
-                        self.device_database.change_state(entity_id, 'on_off', True)
-                        if 'button_event' in device_entry['States']:
+                    is_on = new_state == 'on'
+                    if device_entry['entity_type'] == 'climate':
+                        is_on = new_state != 'off'
+                    
+                    self.device_database.change_state(entity_id, 'on_off', is_on)
+
+                    # Поддержка яркости для light
+                    if device_entry['entity_type'] == 'light':
+                        brightness = event_data['new_state']['attributes'].get('brightness')
+                        if brightness is not None:
+                            # Конвертируем из HA (0-255) в диапазон Сбера (50-1000)
+                            sber_brightness = round(50 + (float(brightness) / 255.0) * 950)
+                            self.device_database.change_state(entity_id, 'light_brightness', sber_brightness)
+                    
+                    if is_on:
+                        if 'button_event' in device_entry.get('States', {}):
                             device_entry['States']['button_event'] = 'click'
                     else:
-                        if device_entry['entity_type'] == 'climate':
-                            is_active = new_state != 'off'
-                            self.device_database.change_state(entity_id, 'on_off', is_active)
-                        else:
-                            self.device_database.change_state(entity_id, 'on_off', False)
-                        
-                        if 'button_event' in device_entry['States']:
+                        if 'button_event' in device_entry.get('States', {}):
                             device_entry['States']['button_event'] = 'double_click'
                     
                     # Send status update to Sber
