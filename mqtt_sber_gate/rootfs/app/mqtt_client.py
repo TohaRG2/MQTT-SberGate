@@ -86,6 +86,22 @@ class SberMQTTClient:
                     new_value = value_wrapper.get('integer_value', 0)
                 elif value_type == 'ENUM':
                     new_value = value_wrapper.get('enum_value', '')
+                elif value_type == 'COLOUR':
+                    # Сбер отправляет цвет в формате HSV: h (0-360), v (0-1000)
+                    import colorsys
+                    colour_value = value_wrapper.get('colour_value', {})
+                    h = colour_value.get('h', 0) / 360.0  # Конвертируем из градусов в 0-1
+                    v = colour_value.get('v', 1000) / 1000.0  # Конвертируем из 0-1000 в 0-1
+                    s = 1.0  # Saturation = 100% (полная насыщенность)
+                    
+                    # Конвертируем HSV в RGB
+                    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+                    new_value = {
+                        'red': int(r * 255),
+                        'green': int(g * 255),
+                        'blue': int(b * 255)
+                    }
+                    log(f"HSV(h={colour_value.get('h')}, v={colour_value.get('v')}) -> RGB({new_value['red']},{new_value['green']},{new_value['blue']})")
 
                 # Отслеживаем, изменилось ли значение на самом деле
                 current_value = self.device_database.get_state(entity_id, key)

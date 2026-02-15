@@ -43,16 +43,36 @@ class HAClient:
             service = 'turn_on' if is_on else 'turn_off'
             url = base_url + service
             
-            # Если это лампа и она включается, проверяем наличие яркости в БД
+            # Если это лампа и она включается, проверяем наличие параметров в БД
             if entity_domain == 'light' and is_on:
+                # Яркость
                 brightness_sber = self.device_database.get_state(entity_id, 'light_brightness')
                 if brightness_sber is not None:
                     # Конвертируем из диапазона Сбера (50-1000) обратно в HA (0-255)
-                    # Используем формулу: ha = (sber - 50) * 255 / 950
                     ha_brightness = round(((float(brightness_sber) - 50) / 950.0) * 255)
                     ha_brightness = max(0, min(255, ha_brightness))
                     payload['brightness'] = ha_brightness
                     log(f"Добавляем яркость в команду HA для {entity_id}: Сбер:{brightness_sber} -> HA:{ha_brightness}")
+                
+                # RGB цвет
+                light_colour = self.device_database.get_state(entity_id, 'light_colour')
+                if light_colour and isinstance(light_colour, dict):
+                    payload['rgb_color'] = [
+                        light_colour.get('red', 255),
+                        light_colour.get('green', 255),
+                        light_colour.get('blue', 255)
+                    ]
+                    log(f"Добавляем RGB цвет в команду HA для {entity_id}: {payload['rgb_color']}")
+                
+                # Цветовая температура (только если нет RGB)
+                if 'rgb_color' not in payload:
+                    colour_temp_sber = self.device_database.get_state(entity_id, 'light_colour_temp')
+                    if colour_temp_sber is not None:
+                        # Конвертация Сбер (0-1000) обратно в mired (153-500)
+                        ha_mireds = round((float(colour_temp_sber) / 1000.0) * (500 - 153) + 153)
+                        ha_mireds = max(153, min(500, ha_mireds))
+                        payload['color_temp'] = ha_mireds
+                        log(f"Добавляем цветовую температуру в команду HA для {entity_id}: Сбер:{colour_temp_sber} -> HA:{ha_mireds} мired")
             
         log(f"HA REST API ЗАПРОС: {url} Данные: {payload}")
         requests.post(url, json=payload, headers=self.get_api_headers())
@@ -118,12 +138,40 @@ class HAClient:
         is_on = state_data.get('state') == 'on'
         self.device_database.change_state(entity_id, 'on_off', is_on)
         
+        # Обработка яркости
         brightness = state_data['attributes'].get('brightness')
         if brightness is not None:
             # Конвертируем из HA (0-255) в диапазон Сбера (50-1000)
             # Формула: sber = 50 + (ha * 950 / 255)
             sber_brightness = round(50 + (float(brightness) / 255.0) * 950)
             self.device_database.change_state(entity_id, 'light_brightness', sber_brightness)
+        
+        # Обработка RGB цвета
+        supported_color_modes = state_data['attributes'].get('supported_color_modes', [])
+        if 'rgb' in supported_color_modes or 'rgbw' in supported_color_modes or 'rgbww' in supported_color_modes:
+            rgb_color = state_data['attributes'].get('rgb_color')
+            if rgb_color and len(rgb_color) >= 3:
+                # RGB в формате Сбера
+                self.device_database.change_state(entity_id, 'light_colour', {
+                    'red': rgb_color[0],
+                    'green': rgb_color[1],
+                    'blue': rgb_color[2]
+                })
+                self.device_database.change_state(entity_id, 'light_mode', 'colour')
+        
+        # Обработка цветовой температуры
+        if 'color_temp' in supported_color_modes:
+            color_temp = state_data['attributes'].get('color_temp')
+            if color_temp is not None:
+                # Конвертация mired (153-500) в Сбер (0-1000)
+                # 153 mired (холодный ~6500K) -> 0
+                # 500 mired (теплый ~2000K) -> 1000
+                sber_temp = round(((color_temp - 153) / (500 - 153)) * 1000)
+                sber_temp = max(0, min(1000, sber_temp))
+                self.device_database.change_state(entity_id, 'light_colour_temp', sber_temp)
+                # Если нет RGB, то режим белый
+                if not self.device_database.get_state(entity_id, 'light_colour'):
+                    self.device_database.change_state(entity_id, 'light_mode', 'white')
 
     def update_script_entity(self, entity_id, state_data):
         """Обновление сущности типа 'скрипт' (script)."""
@@ -447,12 +495,35 @@ class HAClient:
                 is_on = new_state == 'on'
                 self.device_database.change_state(entity_id, 'on_off', is_on)
                 
-                # Обновление яркости для света
+                # Обновление параметров для света
                 if device_entry['category'] == 'light':
-                    brightness = event_data['new_state']['attributes'].get('brightness')
+                    attributes = event_data['new_state']['attributes']
+                    
+                    # Яркость
+                    brightness = attributes.get('brightness')
                     if brightness is not None:
                         sber_brightness = round(50 + (float(brightness) / 255.0) * 950)
                         self.device_database.change_state(entity_id, 'light_brightness', sber_brightness)
+                    
+                    # RGB цвет
+                    rgb_color = attributes.get('rgb_color')
+                    if rgb_color and len(rgb_color) >= 3:
+                        self.device_database.change_state(entity_id, 'light_colour', {
+                            'red': rgb_color[0],
+                            'green': rgb_color[1],
+                            'blue': rgb_color[2]
+                        })
+                        self.device_database.change_state(entity_id, 'light_mode', 'colour')
+                    
+                    # Цветовая температура
+                    color_temp = attributes.get('color_temp')
+                    if color_temp is not None:
+                        sber_temp = round(((color_temp - 153) / (500 - 153)) * 1000)
+                        sber_temp = max(0, min(1000, sber_temp))
+                        self.device_database.change_state(entity_id, 'light_colour_temp', sber_temp)
+                        # Если нет RGB, то режим белый
+                        if not self.device_database.get_state(entity_id, 'light_colour'):
+                            self.device_database.change_state(entity_id, 'light_mode', 'white')
 
             # Публикация в Сбер, если устройство активно
             if is_enabled:

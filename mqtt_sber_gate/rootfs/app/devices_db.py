@@ -243,10 +243,13 @@ class CDevicesDB(object):
     def get_default_value_for_feature(self, feature):
         """Возвращает значение по умолчанию на основе типа данных Сбера."""
         data_type = feature['data_type']
+        feature_name = feature.get('name', '')
+        
         default_values_by_type = {
             'BOOL': False,
             'INTEGER': 0,
-            'ENUM': ''
+            'ENUM': '',
+            'COLOUR': {'red': 255, 'green': 255, 'blue': 255}  # Белый в формате dict
         }
         
         value = default_values_by_type.get(data_type)
@@ -254,7 +257,7 @@ class CDevicesDB(object):
             log(f'Неизвестный тип данных: {data_type}')
             return False
             
-        if feature['name'] == 'online':
+        if feature_name == 'online':
             return True
         return value
 
@@ -276,6 +279,26 @@ class CDevicesDB(object):
             result['value']['integer_value'] = int(state_value)
         elif data_type == 'ENUM':
             result['value']['enum_value'] = state_value
+        elif data_type == 'COLOUR':
+            # COLOUR в Сбере использует HSV формат: h (hue 0-360), v (value 0-1000)
+            if isinstance(state_value, dict):
+                import colorsys
+                r = state_value.get('red', 255) / 255.0
+                g = state_value.get('green', 255) / 255.0
+                b = state_value.get('blue', 255) / 255.0
+                
+                # Конвертируем RGB в HSV
+                h, s, v = colorsys.rgb_to_hsv(r, g, b)
+                
+                # Сбер ожидает h в градусах (0-360) и v в абсолютных значениях (0-1000)
+                result['value']['colour_value'] = {
+                    'h': int(h * 360),
+                    'v': int(v * 1000)
+                }
+                log(f"RGB({int(r*255)},{int(g*255)},{int(b*255)}) -> HSV(h={int(h*360)}, v={int(v*1000)})", 0)
+            else:
+                log(f"ПРЕДУПРЕЖДЕНИЕ: Неверный формат COLOUR для {entity_id}: {state_value}", 5)
+                result['value']['colour_value'] = {'h': 0, 'v': 1000}
             
         log(f"{entity_id}: {result}", 0)
         return result
