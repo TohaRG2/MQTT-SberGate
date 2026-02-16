@@ -37,8 +37,9 @@ class HAClient:
         
         payload = {"entity_id": entity_id}
         
-        if entity_domain == 'button':
+        if entity_domain == 'button' or entity_domain == 'input_button':
             url = base_url + 'press'
+            log(f"Отправка события press для кнопки {entity_id}", 0)
         else:
             service = 'turn_on' if is_on else 'turn_off'
             url = base_url + service
@@ -74,7 +75,7 @@ class HAClient:
                         payload['color_temp'] = ha_mireds
                         log(f"Добавляем цветовую температуру в команду HA для {entity_id}: Сбер:{colour_temp_sber} -> HA:{ha_mireds} мired")
             
-        log(f"HA REST API ЗАПРОС: {url} Данные: {payload}")
+        log(f"Rest запрос в HA: {url} Данные: {payload}", 2)
         requests.post(url, json=payload, headers=self.get_api_headers())
 
     def set_climate_temperature(self, entity_id, changes):
@@ -83,7 +84,7 @@ class HAClient:
         log(f"Отправляем команду в HA для {entity_id} Climate: ")
         api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
         url = f"{api_url}/api/services/{entity_domain}/set_temperature"
-        log(f"HA REST API ЗАПРОС: {url}")
+        log(f"Rest запрос в HA: {url}", 2)
         
         target_temp = self.device_database.get_state(entity_id, 'hvac_temp_set')
         is_on = self.device_database.get_state(entity_id, 'on_off')
@@ -118,7 +119,7 @@ class HAClient:
         log(f"переключатель (switch): {entity_id} {friendly_name}", 0)
         self.device_database.update(entity_id, {
             'entity_ha': True,
-            'entity_type': 'sw',
+            'entity_type': 'switch',
             'friendly_name': friendly_name,
             'category': 'relay'
         })
@@ -206,7 +207,7 @@ class HAClient:
                 'category': 'sensor_temp',
                 'device_class': device_class
             })
-        elif device_class == 'pressure':
+        elif device_class == 'pressure' or device_class == 'atmospheric_pressure':
             self.device_database.update(entity_id, {
                 'entity_ha': True,
                 'entity_type': 'sensor_temp',
@@ -235,6 +236,18 @@ class HAClient:
         self.device_database.update(entity_id, {
             'entity_ha': True,
             'entity_type': 'input_boolean',
+            'friendly_name': friendly_name,
+            'category': 'scenario_button'
+        })
+
+    def update_input_button_entity(self, entity_id, state_data):
+        """Обновление сущности типа 'кнопка' (input_button)."""
+        device_class = state_data['attributes'].get('device_class', '')
+        friendly_name = state_data['attributes'].get('friendly_name', '')
+        log(f"input_button: {entity_id} {friendly_name}({device_class})", 0)
+        self.device_database.update(entity_id, {
+            'entity_ha': True,
+            'entity_type': 'input_button',
             'friendly_name': friendly_name,
             'category': 'scenario_button'
         })
@@ -302,6 +315,7 @@ class HAClient:
             'sensor': self.update_sensor_entity,
             'button': self.update_button_entity,
             'input_boolean': self.update_input_boolean_entity,
+            'input_button': self.update_input_button_entity,
             'climate': self.update_climate_entity,
             'hvac_radiator': self.update_hvac_radiator_entity
         }
@@ -320,7 +334,7 @@ class HAClient:
             db_entity = self.device_database.devices_registry.get(entity_id)
             if db_entity and db_entity.get('category') == 'sensor_temp':
                 device_class = entity['attributes'].get('device_class', '')
-                if device_class in ['temperature', 'humidity', 'pressure']:
+                if device_class in ['temperature', 'humidity', 'pressure', 'atmospheric_pressure']:
                     device_id = db_entity.get('device_id')
                     if device_id:
                         if device_id not in sensor_temp_devices:
@@ -372,18 +386,24 @@ class HAClient:
         """Обработка запроса авторизации WebSocket."""
         log("WebSocket: требуется авторизация")
         token = self.config_options.get('ha-api_token', '')
-        ws.send(json.dumps({
-            "type": "auth",
-            "access_token": token
-        }))
+        try:
+            ws.send(json.dumps({
+                "type": "auth",
+                "access_token": token
+            }))
+        except Exception as e:
+            log(f"Ошибка отправки auth через WebSocket: {e}", 6)
 
     def handle_auth_ok(self, ws, message_data):
         """Обработка успешной авторизации WebSocket."""
         log("WebSocket: авторизация успешна")
-        ws.send(json.dumps({'id': 1, 'type': 'subscribe_events', 'event_type': 'state_changed'}))
-        ws.send(json.dumps({'id': 2, 'type': 'config/area_registry/list'}))
-        ws.send(json.dumps({'id': 3, 'type': 'config/device_registry/list'}))
-        ws.send(json.dumps({'id': 4, 'type': 'config/entity_registry/list'}))
+        try:
+            ws.send(json.dumps({'id': 1, 'type': 'subscribe_events', 'event_type': 'state_changed'}))
+            ws.send(json.dumps({'id': 2, 'type': 'config/area_registry/list'}))
+            ws.send(json.dumps({'id': 3, 'type': 'config/device_registry/list'}))
+            ws.send(json.dumps({'id': 4, 'type': 'config/entity_registry/list'}))
+        except Exception as e:
+            log(f"Ошибка отправки команд через WebSocket: {e}", 6)
 
     def handle_auth_invalid(self, ws, message_data):
         """Обработка ошибки авторизации WebSocket."""
@@ -464,7 +484,7 @@ class HAClient:
             
             # Обновление состояний датчиков
             if device_entry['category'] == 'sensor_temp':
-                if device_class in ['temperature', 'humidity', 'pressure']:
+                if device_class in ['temperature', 'humidity', 'pressure', 'atmospheric_pressure']:
                     try:
                         value = float(new_state)
                         key = ''
@@ -472,7 +492,7 @@ class HAClient:
                             key = 'temperature'
                         elif device_class == 'humidity':
                             key = 'humidity'
-                        elif device_class == 'pressure':
+                        elif device_class == 'pressure' or device_class == 'atmospheric_pressure':
                             key = 'air_pressure'
                         
                         if key:
@@ -486,14 +506,79 @@ class HAClient:
                                         other_entity_id != entity_id):
                                         self.device_database.change_state(other_entity_id, key, value)
                                         if other_device.get('enabled', False):
-                                            self.publish_status_callback([other_entity_id])
+                                            payload = self.device_database.do_mqtt_json_states_list([other_entity_id])
+                                            self.publish_status_callback(payload)
                     except (ValueError, TypeError):
                         pass
 
+            # Обновление состояний кнопок (scenario_button)
+            elif device_entry['category'] == 'scenario_button':
+                if device_entry.get('entity_type') == 'input_boolean':
+                    if new_state == 'on':
+                        self.device_database.change_state(entity_id, 'button_event', 'click')
+                    elif new_state == 'off':
+                        self.device_database.change_state(entity_id, 'button_event', 'double_click')
+                elif device_entry.get('entity_type') == 'input_button':
+                    self.device_database.change_state(entity_id, 'button_event', 'click')
+
             # Обновление состояний переключателей, света и скриптов
             elif device_entry['category'] in ['relay', 'light']:
-                is_on = new_state == 'on'
-                self.device_database.change_state(entity_id, 'on_off', is_on)
+                # Логика фильтрации эха через ожидаемое состояние
+                expected_state = device_entry.get('_expected_mqtt_state')
+                
+                if device_entry.get('entity_type') == 'button':
+                    # Для кнопки просто игнорируем, если ожидаем реакцию
+                    if expected_state is not None:
+                        log(f"Игнорируем эхо кнопки {entity_id}", 0)
+                        device_entry.pop('_expected_mqtt_state', None)
+                        return
+                        
+                    # Обработка кнопки как переключателя
+                    attributes = event_data['new_state'].get('attributes', {})
+                    click_type = attributes.get('click_type') or attributes.get('event_type')
+                    
+                    if click_type in ['double_click', 'long_press']:
+                        self.device_database.change_state(entity_id, 'on_off', False)
+                    else:
+                        self.device_database.change_state(entity_id, 'on_off', True)
+                
+                else:
+                    # Для переключателей/ламп
+                    is_on = new_state == 'on'
+                    
+                    # Если есть ожидаемое состояние от MQTT
+                    if expected_state is not None:
+                        # Если пришло то, что ожидали (или противоположное из-за лага)
+                        # Мы просто сбрасываем ожидание, но НЕ отправляем обновление в Сбер,
+                        # так как Сбер и так знает это состояние (он его и прислал)
+                        if is_on == expected_state:
+                            log(f"Получено ожидаемое состояние {is_on} для {entity_id}. Эхо подавлено.", 0)
+                            device_entry.pop('_expected_mqtt_state', None)
+                            return
+                        else:
+                            # Пришло промежуточное состояние (не то, что ждали)
+                            # Игнорируем его, ждем правильного
+                            log(f"Игнорируем промежуточное состояние {is_on} для {entity_id} (ждем {expected_state})", 0)
+                            return
+
+                    # Штатная обработка изменений (ручное управление)
+                    current_on_off = self.device_database.get_state(entity_id, 'on_off')
+                    if is_on != current_on_off:
+                        # Проверка на дребезг контактов (игнорируем мгновенные переключения)
+                        import time
+                        last_change = device_entry.get('_last_state_change_ts', 0)
+                        now = time.time()
+                        
+                        # Если состояние меняется слишком быстро (<0.5 сек) и это не ожидаемая команда
+                        if now - last_change < 0.5:
+                             log(f"Игнорируем слишком частое переключение {entity_id}", 0)
+                             return
+
+                        device_entry['_last_state_change_ts'] = now
+                        self.device_database.change_state(entity_id, 'on_off', is_on)
+                    else:
+                         log(f"Состояние {entity_id} не изменилось ({is_on}), пропускаем обновление Сбера", 0)
+                         return
                 
                 # Обновление параметров для света
                 if device_entry['category'] == 'light':
@@ -527,7 +612,8 @@ class HAClient:
 
             # Публикация в Сбер, если устройство активно
             if is_enabled:
-                self.publish_status_callback([entity_id])
+                payload = self.device_database.do_mqtt_json_states_list([entity_id])
+                self.publish_status_callback(payload)
 
     def handle_websocket_default(self, ws, message_data):
         """Обработчик по умолчанию для неизвестных типов сообщений WebSocket."""
@@ -551,7 +637,15 @@ class HAClient:
                     on_error=lambda ws, err: log(f"WebSocket: ошибка: {err}", 6),
                     on_close=self.on_websocket_close
                 )
-                self.websocket_client.run_forever()
+                # Запускаем с ping_interval для поддержания соединения
+                # ping_interval - как часто отправлять ping (30 сек)
+                # ping_timeout - сколько ждать pong ответа (2 сек, должно быть меньше interval)
+                # ping_payload - данные для ping (должны быть строкой или байтами)
+                self.websocket_client.run_forever(
+                    ping_interval=30,
+                    ping_timeout=2,
+                    ping_payload=b'ping'
+                )
             except Exception as e:
                 log(f"WebSocket: критическая ошибка: {e}", 7)
             

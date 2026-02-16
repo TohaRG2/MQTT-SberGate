@@ -237,7 +237,7 @@ class CDevicesDB(object):
                 payload['devices'].append(dev_entry)
                 
         self.mqtt_json_devices_list = json.dumps(payload)
-        log(f'Новый список устройств для MQTT: {self.mqtt_json_devices_list}', 1)
+        log(f'Новый список устройств для MQTT: {self.mqtt_json_devices_list}', 2)
         return self.mqtt_json_devices_list
 
     def get_default_value_for_feature(self, feature):
@@ -332,7 +332,7 @@ class CDevicesDB(object):
                         # Обработка отсутствующих обязательных состояний
                         if current_val is None:
                             if feature.get('required', False):
-                                log(f'Отсутствует обязательное состояние: {feature_name}')
+                                log(f'Отсутствует обязательное состояние: {feature_name}', 1)
                                 device['States'][feature_name] = self.get_default_value_for_feature(feature)
                                 
                         # Добавляем только если значение существует (теперь инициализировано, если обязательно)
@@ -352,7 +352,7 @@ class CDevicesDB(object):
             }
             
         self.mqtt_json_states_list = json.dumps(states_payload)
-        log(f"Отправка состояний в Сбер: {self.mqtt_json_states_list}", 1)
+        log(f"Отправка состояний в Сбер: {self.mqtt_json_states_list[:200]}", 2)
         return self.mqtt_json_states_list
 
     def do_http_json_devices_list(self):

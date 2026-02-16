@@ -74,9 +74,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             "utf-8"))
         self.wfile.write(bytes('<h1>Управление устройствами</h1> <p><a href="index.html">Сбер Агент</a></p>', "utf-8"))
         self.wfile.write(bytes('<h1>Список устройств:</h1> <br>', "utf-8"))
+        self.wfile.write(bytes('<table border="1" cellpadding="5" cellspacing="0">', "utf-8"))
+        self.wfile.write(bytes('<tr><th>ID</th><th>Имя</th><th>Тип</th></tr>', "utf-8"))
         for entity_id in self.device_database.devices_registry:
-            device_name = self.device_database.devices_registry[entity_id]['name']
-            self.wfile.write(bytes(f"{entity_id}:{device_name}<br>", "utf-8"))
+            device = self.device_database.devices_registry[entity_id]
+            device_name = device.get('name', '')
+            device_type = device.get('entity_type', 'unknown')
+            self.wfile.write(bytes(f"<tr><td>{entity_id}</td><td>{device_name}</td><td>{device_type}</td></tr>", "utf-8"))
+        self.wfile.write(bytes('</table>', "utf-8"))
         self.wfile.write(bytes('</body></html>', "utf-8"))
 
     def handle_api_models(self):
@@ -140,6 +145,39 @@ class RequestHandler(BaseHTTPRequestHandler):
         api_prefix = '/api/v1/'
         log(f"PROXY {api_prefix}: {self.path}")
         
+        # Фиктивные ответы для несуществующих эндпоинтов Сбера, которые запрашивает старый UI
+        if self.path.endswith('/transformations'):
+            # Загружаем локальный файл transformations.json
+            try:
+                transformations_path = os.path.join(os.path.dirname(__file__), 'data', 'transformations.json')
+                if os.path.exists(transformations_path):
+                    with open(transformations_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        # Если файл содержит ключ "transformations", возвращаем его значение, иначе весь объект
+                        if "transformations" in data:
+                             self.send_json_response(data["transformations"])
+                        else:
+                             self.send_json_response(data)
+                    return
+                else:
+                    log(f"Файл {transformations_path} не найден. Возвращаем пустой список.")
+                    self.send_json_response([])
+                    return
+            except Exception as e:
+                log(f"Ошибка при чтении transformations.json: {e}")
+                self.send_json_response([])
+                return
+
+        if self.path.endswith('/aggregations'):
+            log(f"Возвращаем пустой список для {self.path} (эндпоинт устарел или не существует)")
+            self.send_json_response([])
+            return
+
+        if self.path.endswith('/objects'):
+             log(f"Возвращаем пустой список объектов для {self.path} (эндпоинт устарел или не существует)")
+             self.send_json_response({"objects": []})
+             return
+
         target_url = f"{self.config_options['sber-http_api_endpoint']}/v1/mqtt-gate/{self.path[len(api_prefix):]}"
         headers = {'content-type': 'application/json'}
         auth = (self.config_options['sber-mqtt_login'], self.config_options['sber-mqtt_password'])

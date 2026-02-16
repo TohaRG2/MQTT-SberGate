@@ -67,7 +67,7 @@ class SberMQTTClient:
             log(f"Ошибка декодирования команды: {message.payload}", 6)
             return
 
-        log(f"Получена команда от Сбера через MQTT: {command_data}")
+        log(f"Получена команда от Сбера через MQTT: {command_data}", 2)
         
         last_entity_id = None
         for entity_id, device_data in command_data.get('devices', {}).items():
@@ -109,6 +109,10 @@ class SberMQTTClient:
 
                 # Обновляем локальную базу данных
                 self.device_database.change_state(entity_id, key, new_value)
+                
+                # Устанавливаем ожидаемое состояние для фильтрации эха
+                device_info = self.device_database.devices_registry.get(entity_id, {})
+                device_info['_expected_mqtt_state'] = new_value
 
             # Передаем команду в Home Assistant
             if self.ha_client:
@@ -132,7 +136,7 @@ class SberMQTTClient:
         except:
             device_ids = []
             
-        log(f"Получен запрос статуса для: {device_ids}")
+        log(f"Получен запрос статуса для: {device_ids}",2)
         response_payload = self.device_database.do_mqtt_json_states_list(device_ids)
         self.send_status(response_payload)
 
