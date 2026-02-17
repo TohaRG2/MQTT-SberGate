@@ -114,43 +114,72 @@ class HAClient:
         url = f"{api_url}/api/services/script/{service}"
         requests.post(url, json={"entity_id": entity_id}, headers=self.get_api_headers())
 
-    # Помощники для обновления сущностей
-    def update_switch_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'переключатель' (switch)."""
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        log_deeptrace(f"переключатель (switch): {entity_id} {friendly_name}")
-        self.device_database.update(entity_id, {
-            'entity_ha': True,
-            'entity_type': 'switch',
-            'friendly_name': friendly_name,
-            'category': 'relay'
-        })
-        is_on = state_data.get('state') == 'on'
-        self.device_database.change_state(entity_id, 'on_off', is_on)
+    ENTITY_TYPE_MAP = {
+        'switch':         {'entity_type': 'switch',        'category': 'relay'},
+        'script':         {'entity_type': 'scr',           'category': 'relay'},
+        'button':         {'entity_type': 'button',        'category': 'relay'},
+        'input_boolean':  {'entity_type': 'input_boolean', 'category': 'scenario_button'},
+        'input_button':   {'entity_type': 'input_button',  'category': 'scenario_button'},
+        'climate':        {'entity_type': 'climate',       'category': 'hvac_ac'},
+        'light':          {'entity_type': 'light',         'category': 'light'},
+    }
 
-    def update_light_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'свет' (light)."""
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        log_deeptrace(f"свет (light): {entity_id} {friendly_name}")
-        self.device_database.update(entity_id, {
+    # Помощники для обновления сущностей
+    def update_entity(self, entity_id, state_data):
+        """Универсальный метод обновления сущности."""
+        domain = entity_id.split('.')[0]
+        attributes = state_data.get('attributes', {})
+        friendly_name = attributes.get('friendly_name', '')
+        device_class = attributes.get('device_class', '')
+
+        config = self.ENTITY_TYPE_MAP.get(domain)
+
+        # Специальная обработка для sensor и hvac_radiator
+        if not config:
+            if domain == 'sensor' and device_class in ['temperature', 'humidity', 'pressure', 'atmospheric_pressure']:
+                config = {'entity_type': 'sensor_temp', 'category': 'sensor_temp'}
+            elif domain == 'hvac_radiator' and device_class == 'temperature':
+                 config = {'entity_type': 'hvac_radiator', 'category': 'hvac_radiator'}
+
+        if not config:
+            self.update_default_entity(entity_id, state_data)
+            return
+
+        log_deeptrace(f"Обновление {domain}: {entity_id} {friendly_name} ({device_class})")
+
+        update_data = {
             'entity_ha': True,
-            'entity_type': 'light',
+            'entity_type': config['entity_type'],
             'friendly_name': friendly_name,
-            'category': 'light'
-        })
-        is_on = state_data.get('state') == 'on'
-        self.device_database.change_state(entity_id, 'on_off', is_on)
-        
+            'category': config['category']
+        }
+        if device_class:
+            update_data['device_class'] = device_class
+
+        self.device_database.update(entity_id, update_data)
+
+        # Обновление состояний
+        state = state_data.get('state')
+
+        if domain in ['switch', 'script', 'light']:
+             is_on = state == 'on'
+             self.device_database.change_state(entity_id, 'on_off', is_on)
+
+        if domain == 'light':
+             self._update_light_attributes(entity_id, attributes)
+
+    def _update_light_attributes(self, entity_id, attributes):
+        """Вспомогательный метод для обновления атрибутов света."""
         # Обработка яркости
-        brightness = state_data['attributes'].get('brightness')
+        brightness = attributes.get('brightness')
         if brightness is not None:
             sber_brightness = ha_brightness_to_sber(brightness)
             self.device_database.change_state(entity_id, 'light_brightness', sber_brightness)
-        
+
         # Обработка RGB цвета
-        supported_color_modes = state_data['attributes'].get('supported_color_modes', [])
+        supported_color_modes = attributes.get('supported_color_modes', [])
         if 'rgb' in supported_color_modes or 'rgbw' in supported_color_modes or 'rgbww' in supported_color_modes:
-            rgb_color = state_data['attributes'].get('rgb_color')
+            rgb_color = attributes.get('rgb_color')
             if rgb_color and len(rgb_color) >= 3:
                 # RGB в формате Сбера
                 self.device_database.change_state(entity_id, 'light_colour', {
@@ -159,10 +188,10 @@ class HAClient:
                     'blue': rgb_color[2]
                 })
                 self.device_database.change_state(entity_id, 'light_mode', 'colour')
-        
+
         # Обработка цветовой температуры
         if 'color_temp' in supported_color_modes:
-            color_temp = state_data['attributes'].get('color_temp')
+            color_temp = attributes.get('color_temp')
             if color_temp is not None:
                 sber_temp = ha_temp_to_sber(color_temp)
                 self.device_database.change_state(entity_id, 'light_colour_temp', sber_temp)
@@ -170,111 +199,9 @@ class HAClient:
                 if not self.device_database.get_state(entity_id, 'light_colour'):
                     self.device_database.change_state(entity_id, 'light_mode', 'white')
 
-    def update_script_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'скрипт' (script)."""
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        log_deeptrace(f"скрипт (script): {entity_id} {friendly_name}")
-        self.device_database.update(entity_id, {
-            'entity_ha': True,
-            'entity_type': 'scr',
-            'friendly_name': friendly_name,
-            'category': 'relay'
-        })
-        is_on = state_data.get('state') == 'on'
-        self.device_database.change_state(entity_id, 'on_off', is_on)
-
-    def update_sensor_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'датчик' (sensor)."""
-        device_class = state_data['attributes'].get('device_class', '')
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        if device_class == 'temperature':
-            self.device_database.update(entity_id, {
-                'entity_ha': True,
-                'entity_type': 'sensor_temp',
-                'friendly_name': friendly_name,
-                'category': 'sensor_temp',
-                'device_class': device_class
-            })
-        elif device_class == 'humidity':
-            self.device_database.update(entity_id, {
-                'entity_ha': True,
-                'entity_type': 'sensor_temp',
-                'friendly_name': friendly_name,
-                'category': 'sensor_temp',
-                'device_class': device_class
-            })
-        elif device_class == 'pressure' or device_class == 'atmospheric_pressure':
-            self.device_database.update(entity_id, {
-                'entity_ha': True,
-                'entity_type': 'sensor_temp',
-                'friendly_name': friendly_name,
-                'category': 'sensor_temp',
-                'device_class': device_class
-            })
-
-    def update_button_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'кнопка' (button)."""
-        device_class = state_data['attributes'].get('device_class', '')
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        log_deeptrace(f"кнопка (button): {entity_id} {friendly_name}({device_class})")
-        self.device_database.update(entity_id, {
-            'entity_ha': True,
-            'entity_type': 'button',
-            'friendly_name': friendly_name,
-            'category': 'relay'
-        })
-
-    def update_input_boolean_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'переключатель' (input_boolean)."""
-        device_class = state_data['attributes'].get('device_class', '')
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        log_deeptrace(f"input_boolean: {entity_id} {friendly_name}({device_class})")
-        self.device_database.update(entity_id, {
-            'entity_ha': True,
-            'entity_type': 'input_boolean',
-            'friendly_name': friendly_name,
-            'category': 'scenario_button'
-        })
-
-    def update_input_button_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'кнопка' (input_button)."""
-        device_class = state_data['attributes'].get('device_class', '')
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        log_deeptrace(f"input_button: {entity_id} {friendly_name}({device_class})")
-        self.device_database.update(entity_id, {
-            'entity_ha': True,
-            'entity_type': 'input_button',
-            'friendly_name': friendly_name,
-            'category': 'scenario_button'
-        })
-
-    def update_climate_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'климат' (climate)."""
-        device_class = state_data['attributes'].get('device_class', '')
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        log_deeptrace(f"климат (climate): {entity_id} {friendly_name}({device_class})")
-        self.device_database.update(entity_id, {
-            'entity_ha': True,
-            'entity_type': 'climate',
-            'friendly_name': friendly_name,
-            'category': 'hvac_ac'
-        })
-
-    def update_hvac_radiator_entity(self, entity_id, state_data):
-        """Обновление сущности типа 'радиатор' (hvac_radiator)."""
-        device_class = state_data['attributes'].get('device_class', '')
-        friendly_name = state_data['attributes'].get('friendly_name', '')
-        if device_class == 'temperature':
-            self.device_database.update(entity_id, {
-                'entity_ha': True,
-                'entity_type': 'hvac_radiator',
-                'friendly_name': friendly_name,
-                'category': 'hvac_radiator'
-            })
-
     def update_default_entity(self, entity_id, state_data):
         """Обработчик по умолчанию для неиспользуемых типов сущностей."""
-        log_deeptrace(f"Неиспользуемый тип: {entity_id}")
+        # log_deeptrace(f"Неиспользуемый тип: {entity_id}")
         pass
 
     def initialize_entities_via_rest(self):
@@ -282,7 +209,7 @@ class HAClient:
         api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
         url = f"{api_url}/api/states"
         log_info(f"Подключаемся к HA, (ha-api_url: {api_url})")
-        
+
         attempt = 0
         response = None
         while attempt < 10:
@@ -293,7 +220,7 @@ class HAClient:
             except Exception:
                 log_error(f"Ошибка подключения к HA. Ждём 5 сек перед повторным подключением. Попытка {attempt}")
                 time.sleep(5)
-        
+
         if response and response.status_code == 200:
             log_info('Запрос устройств из Home Assistant выполнен штатно. Обрабатываем полученный список')
             ha_entities = response.json()
@@ -304,25 +231,10 @@ class HAClient:
                 log_error(f"Код ответа сервера: {response.status_code}")
             ha_entities = []
 
-        update_handlers = {
-            'switch': self.update_switch_entity,
-            'light': self.update_light_entity,
-            'script': self.update_script_entity,
-            'sensor': self.update_sensor_entity,
-            'button': self.update_button_entity,
-            'input_boolean': self.update_input_boolean_entity,
-            'input_button': self.update_input_button_entity,
-            'climate': self.update_climate_entity,
-            'hvac_radiator': self.update_hvac_radiator_entity
-        }
-
         # Шаг 1: Инициализируем все сущности
         for entity in ha_entities:
-            entity_id = entity['entity_id']
-            entity_type, _ = entity_id.split('.', 1)
-            handler = update_handlers.get(entity_type, self.update_default_entity)
-            handler(entity_id, entity)
-        
+            self.update_entity(entity['entity_id'], entity)
+
         # Шаг 2: Объединяем значения температуры, влажности и давления для датчиков с одним device_id
         sensor_temp_devices = {}
         for entity in ha_entities:

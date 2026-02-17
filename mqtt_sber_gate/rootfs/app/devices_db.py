@@ -1,8 +1,10 @@
 import json
-from logger import log_info, log_debug, log_trace, log_deeptrace, log_warning, log_error
+
+import sber_api
 from config import read_json_file, write_json_file, VERSION
 from converters import rgb_to_sber_hsv
-import sber_api
+from logger import log_info, log_debug, log_trace, log_deeptrace, log_warning, log_error
+
 
 class CDevicesDB(object):
     """
@@ -14,7 +16,7 @@ class CDevicesDB(object):
         """Инициализация базы данных из файла и настройка начального состояния."""
         self.db_file_path = db_file_path
         self.devices_registry = read_json_file(db_file_path)
-        
+
         # Убеждаемся, что у всех устройств есть флаг 'enabled'
         for entity_id in self.devices_registry:
             if self.devices_registry[entity_id].get('enabled') is None:
@@ -23,7 +25,7 @@ class CDevicesDB(object):
         self.mqtt_json_devices_list = '{}'
         self.mqtt_json_states_list = '{}'
         self.http_json_devices_list = '{}'
-        
+
         self.do_http_json_devices_list()
 
     def generate_new_id(self, prefix):
@@ -59,15 +61,15 @@ class CDevicesDB(object):
         if entity_id not in self.devices_registry:
             log_warning(f"Устройство id={entity_id} не найдено")
             return
-            
+
         device = self.devices_registry[entity_id]
         if 'States' not in device:
             log_debug(f"Для устройства id={entity_id} не найдены состояния (States). Создаем.")
             device['States'] = {}
-            
+
         if state_key not in device['States']:
             log_deeptrace(f"Для устройства id={entity_id} ключ={state_key} не найден. Создаем.")
-            
+
         device['States'][state_key] = value
 
     def get_states(self, entity_id):
@@ -106,116 +108,61 @@ class CDevicesDB(object):
             'entity_type': '',
             'friendly_name': ''
         }
-        
+
         if entity_id not in self.devices_registry:
             log_info(f"Устройство {entity_id} не найдено. Добавляем новую запись.")
             self.devices_registry[entity_id] = {}
             for key, default_val in default_attributes.items():
                 self.devices_registry[entity_id][key] = data.get(key, default_val)
-                
+
             if data.get('category') == 'scenario_button':
                 self.devices_registry[entity_id]['States'] = {'button_event': ''}
 
         # Обновление новыми данными
         for key, value in data.items():
             self.devices_registry[entity_id][key] = value
-            
+
         # Убеждаемся, что имя не пустое
         if not self.devices_registry[entity_id].get('name'):
             self.devices_registry[entity_id]['name'] = self.devices_registry[entity_id].get('friendly_name', '')
-            
-        self.save_db()
 
-    # def get_sber_formatted_states(self, entity_id):
-    #     """
-    #     Устаревший метод для форматирования состояний для Sber MQTT.
-    #     Рекомендуется использовать do_mqtt_json_states_list для динамического форматирования.
-    #     """
-    #     device = self.devices_registry.get(entity_id)
-    #     if not device:
-    #         log(f"Запрошен несуществующий объект: {entity_id}")
-    #         return []
-    #
-    #     states = device.get('States')
-    #     if states is None:
-    #         log(f"У объекта {entity_id} отсутствует информация о состояниях")
-    #         return []
-    #
-    #     category = device.get('category')
-    #     result_states = []
-    #
-    #     # Всегда добавляем статус online
-    #     result_states.append({'key': 'online', 'value': {"type": "BOOL", "bool_value": True}})
-    #
-    #     if category == 'relay':
-    #         is_on = states.get('on_off', False)
-    #         result_states.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": is_on}})
-    #
-    #     elif category == 'sensor_temp':
-    #         if 'temperature' in states:
-    #             temp_val = round(states.get('temperature', 0) * 10)
-    #             result_states.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": temp_val}})
-    #         if 'humidity' in states:
-    #             hum_val = round(states.get('humidity', 0))
-    #             result_states.append({'key': 'humidity', 'value': {"type": "INTEGER", "integer_value": hum_val}})
-    #         if 'air_pressure' in states:
-    #             press_val = round(states.get('air_pressure', 0))
-    #             result_states.append({'key': 'air_pressure', 'value': {"type": "INTEGER", "integer_value": press_val}})
-    #
-    #     elif category == 'scenario_button':
-    #         event = states.get('button_event', 'click')
-    #         result_states.append({'key': 'button_event', 'value': {"type": "ENUM", "enum_value": event}})
-    #
-    #     elif category == 'hvac_ac':
-    #         temp = round(states.get('temperature', 20) * 10)
-    #         target = round(states.get('hvac_temp_set', 20) * 10)
-    #         result_states.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": True}})
-    #         result_states.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": temp}})
-    #         result_states.append({'key': 'hvac_temp_set', 'value': {"type": "INTEGER", "integer_value": target}})
-    #
-    #     elif category == 'hvac_radiator':
-    #         temp = round(states.get('temperature', 0) * 10)
-    #         result_states.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": True}})
-    #         result_states.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": temp}})
-    #         result_states.append({'key': 'hvac_temp_set', 'value': {"type": "INTEGER", "integer_value": 30}})
-    #
-    #     return result_states
+        self.save_db()
 
     def do_mqtt_json_devices_list(self):
         """Генерация JSON для публикации конфигурации устройств в Sber MQTT."""
         payload = {'devices': []}
-        
+
         # Добавляем корневой хаб
         payload['devices'].append({
-            "id": "root", 
-            "name": "Вумный контроллер", 
-            'hw_version': VERSION, 
+            "id": "root",
+            "name": "Вумный контроллер",
+            'hw_version': VERSION,
             'sw_version': VERSION,
             'model': {
-                'id': 'ID_root_hub', 
-                'manufacturer': 'TM', 
+                'id': 'ID_root_hub',
+                'manufacturer': 'TM',
                 'model': 'VHub',
-                'description': "HA MQTT SberGate HUB", 
-                'category': 'hub', 
+                'description': "HA MQTT SberGate HUB",
+                'category': 'hub',
                 'features': ['online']
             }
         })
-        
+
         for entity_id, device in self.devices_registry.items():
             if device.get('enabled', False):
                 dev_entry = {
-                    'id': entity_id, 
-                    'name': device.get('name', ''), 
+                    'id': entity_id,
+                    'name': device.get('name', ''),
                     'default_name': device.get('default_name', ''),
                     'home': device.get('home', 'Мой дом'),
                     'room': device.get('room', ''),
                     'hw_version': device.get('hw_version', ''),
                     'sw_version': device.get('sw_version', '')
                 }
-                
+
                 category = device.get('category', 'relay')
                 category_features = sber_api.Categories.get(category)
-                
+
                 active_features = []
                 if category_features:
                     for feature in category_features:
@@ -228,15 +175,15 @@ class CDevicesDB(object):
                                 active_features.append(feature_name)
 
                 dev_entry['model'] = {
-                    'id': f'ID_{category}', 
-                    'manufacturer': 'TM', 
+                    'id': f'ID_{category}',
+                    'manufacturer': 'TM',
                     'model': f'Model_{category}',
-                    'category': category, 
+                    'category': category,
                     'features': active_features
                 }
                 dev_entry['model_id'] = ''
                 payload['devices'].append(dev_entry)
-                
+
         self.mqtt_json_devices_list = json.dumps(payload)
         log_debug(f'Новый список устройств для MQTT: {self.mqtt_json_devices_list}')
         return self.mqtt_json_devices_list
@@ -245,19 +192,19 @@ class CDevicesDB(object):
         """Возвращает значение по умолчанию на основе типа данных Сбера."""
         data_type = feature['data_type']
         feature_name = feature.get('name', '')
-        
+
         default_values_by_type = {
             'BOOL': False,
             'INTEGER': 0,
             'ENUM': '',
             'COLOUR': {'red': 255, 'green': 255, 'blue': 255}  # Белый в формате dict
         }
-        
+
         value = default_values_by_type.get(data_type)
         if value is None:
             log_error(f'Неизвестный тип данных: {data_type}')
             return False
-            
+
         if feature_name == 'online':
             return True
         return value
@@ -267,13 +214,13 @@ class CDevicesDB(object):
         feature_name = feature['name']
         state_value = self.devices_registry[entity_id]['States'][feature_name]
         data_type = feature['data_type']
-        
+
         # Сбер ожидает температуру, умноженную на 10
         if feature_name == 'temperature':
             state_value = state_value * 10
-            
+
         result = {'key': feature_name, 'value': {'type': data_type}}
-        
+
         if data_type == 'BOOL':
             result['value']['bool_value'] = bool(state_value)
         elif data_type == 'INTEGER':
@@ -286,9 +233,9 @@ class CDevicesDB(object):
                 r = state_value.get('red', 255)
                 g = state_value.get('green', 255)
                 b = state_value.get('blue', 255)
-                
+
                 h_sber, s_sber, v_sber = rgb_to_sber_hsv(r, g, b)
-                
+
                 result['value']['colour_value'] = {
                     'h': h_sber,
                     's': s_sber,
@@ -298,50 +245,50 @@ class CDevicesDB(object):
             else:
                 log_warning(f"ПРЕДУПРЕЖДЕНИЕ: Неверный формат COLOUR для {entity_id}: {state_value}")
                 result['value']['colour_value'] = {'h': 0, 's': 0, 'v': 1000}
-            
+
         log_deeptrace(f"{entity_id}: {result}")
         return result
 
     def do_mqtt_json_states_list(self, entity_id_list):
         """Генерация JSON для обновлений состояния в Sber MQTT."""
         states_payload = {'devices': {}}
-        
+
         if not entity_id_list:
             entity_id_list = list(self.devices_registry.keys())
-            
+
         for entity_id in entity_id_list:
             device = self.devices_registry.get(entity_id)
             if device and device.get('enabled'):
                 category = device.get('category', 'relay')
                 if not device.get('category'):
                     device['category'] = category
-                    
+
                 states_payload['devices'][entity_id] = {}
                 features = sber_api.Categories.get(category)
-                
+
                 if features:
                     if 'States' not in device:
                         device['States'] = {}
-                        
+
                     formatted_states = []
                     for feature in features:
                         feature_name = feature['name']
                         current_val = device['States'].get(feature_name)
-                        
+
                         # Обработка отсутствующих обязательных состояний
                         if current_val is None:
                             if feature.get('required', False):
                                 log_trace(f'Отсутствует обязательное состояние: {feature_name}')
                                 device['States'][feature_name] = self.get_default_value_for_feature(feature)
-                                
+
                         # Добавляем только если значение существует (теперь инициализировано, если обязательно)
                         if device['States'].get(feature_name) is not None:
                             formatted_states.append(self.format_state_for_sber(entity_id, feature))
-                            
+
                             # Сброс событий кнопок после отправки
                             if feature_name == 'button_event':
                                 device['States']['button_event'] = ''
-                                
+
                     states_payload['devices'][entity_id]['states'] = formatted_states
 
         # Возврат к статусу online корневого хаба, если устройства не сообщаются
@@ -349,7 +296,7 @@ class CDevicesDB(object):
             states_payload['devices'] = {
                 "root": {"states": [{"key": "online", "value": {"type": "BOOL", "bool_value": True}}]}
             }
-            
+
         self.mqtt_json_states_list = json.dumps(states_payload)
         log_debug(f"Отправка состояний в Сбер: {self.mqtt_json_states_list[:200]}")
         return self.mqtt_json_states_list
@@ -372,7 +319,7 @@ class CDevicesDB(object):
                 'sw_version': device.get('sw_version', '')
             }
             device_list.append(device_info)
-            
+
         self.http_json_devices_list = json.dumps({'devices': device_list})
         return self.http_json_devices_list
 
