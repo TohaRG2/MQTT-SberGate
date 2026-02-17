@@ -264,6 +264,65 @@ class HAClient:
             'category': 'hvac_ac'
         })
 
+    def update_vacuum_entity(self, entity_id, state_data):
+        """Обновление сущности типа 'пылесос' (vacuum)."""
+        friendly_name = state_data['attributes'].get('friendly_name', '')
+        log(f"пылесос (vacuum): {entity_id} {friendly_name}", 0)
+        self.device_database.update(entity_id, {
+            'entity_ha': True,
+            'entity_type': 'vacuum',
+            'friendly_name': friendly_name,
+            'category': 'vacuum_cleaner'
+        })
+
+        # Маппинг статусов HA → Сбер
+        # HA: cleaning, paused, returning, docked, idle, error
+        ha_state = state_data.get('state', 'docked')
+        sber_status = self._map_vacuum_ha_state_to_sber(ha_state)
+        self.device_database.change_state(entity_id, 'vacuum_cleaner_status', sber_status)
+
+        # Уровень заряда батареи
+        battery = state_data['attributes'].get('battery_level')
+        if battery is not None:
+            self.device_database.change_state(entity_id, 'battery_percentage', int(battery))
+
+    def _map_vacuum_ha_state_to_sber(self, ha_state):
+        """Конвертация статуса HA в статус Сбер vacuum_cleaner_status."""
+        mapping = {
+            'cleaning': 'cleaning',
+            'paused': 'pause',
+            'returning': 'returning_to_dock',
+            'docked': 'docked',
+            'idle': 'pause',
+            'error': 'pause',
+        }
+        return mapping.get(ha_state, 'on_base')
+
+    def _map_vacuum_sber_status_to_command(self, sber_command):
+        """Конвертация команды Сбера в сервис HA."""
+        # vacuum_cleaner_command: start, pause, return_to_base, continue
+        mapping = {
+            'start': 'start',
+            'pause': 'pause',
+            'return_to_dock': 'return_to_base',
+            'continue': 'start',  # resume — тот же start в HA
+        }
+        return mapping.get(sber_command, 'start')
+
+    def send_vacuum_command(self, entity_id):
+        """Отправка команды управления пылесосом в Home Assistant."""
+        api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
+        base_url = f"{api_url}/api/services/vacuum/"
+
+        sber_command = self.device_database.get_state(entity_id, 'vacuum_cleaner_command')
+        ha_service = self._map_vacuum_sber_status_to_command(sber_command) if sber_command else 'start'
+        log(f"Пылесос {entity_id}: команда Сбер='{sber_command}' -> HA сервис='{ha_service}'")
+
+        url = base_url + ha_service
+        payload = {"entity_id": entity_id}
+        log(f"REST запрос в HA: {url}, данные: {payload}", 2)
+        requests.post(url, json=payload, headers=self.get_api_headers())
+
     def update_hvac_radiator_entity(self, entity_id, state_data):
         """Обновление сущности типа 'радиатор' (hvac_radiator)."""
         device_class = state_data['attributes'].get('device_class', '')
@@ -317,7 +376,8 @@ class HAClient:
             'input_boolean': self.update_input_boolean_entity,
             'input_button': self.update_input_button_entity,
             'climate': self.update_climate_entity,
-            'hvac_radiator': self.update_hvac_radiator_entity
+            'hvac_radiator': self.update_hvac_radiator_entity,
+            'vacuum': self.update_vacuum_entity
         }
 
         # Шаг 1: Инициализируем все сущности
@@ -609,6 +669,20 @@ class HAClient:
                         # Если нет RGB, то режим белый
                         if not self.device_database.get_state(entity_id, 'light_colour'):
                             self.device_database.change_state(entity_id, 'light_mode', 'white')
+
+            # Обновление состояний пылесоса
+            elif device_entry['category'] == 'vacuum_cleaner':
+                attributes = event_data['new_state'].get('attributes', {})
+
+                # Статус (cleaning / pause / returning_to_base / on_base)
+                sber_status = self._map_vacuum_ha_state_to_sber(new_state)
+                self.device_database.change_state(entity_id, 'vacuum_cleaner_status', sber_status)
+                log(f"Пылесос {entity_id}: HA='{new_state}' -> Сбер статус='{sber_status}'", 1)
+
+                # Уровень заряда
+                battery = attributes.get('battery_level')
+                if battery is not None:
+                    self.device_database.change_state(entity_id, 'battery_percentage', int(battery))
 
             # Публикация в Сбер, если устройство активно
             if is_enabled:

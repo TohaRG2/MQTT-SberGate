@@ -114,6 +114,14 @@ class CDevicesDB(object):
                 
             if data.get('category') == 'scenario_button':
                 self.devices_registry[entity_id]['States'] = {'button_event': ''}
+            
+            if data.get('category') == 'vacuum_cleaner':
+                self.devices_registry[entity_id]['States'] = {
+                    'online': True,
+                    'vacuum_cleaner_status': 'on_base',
+                    'vacuum_cleaner_command': '',
+                    'battery_percentage': 100
+                }
 
         # Обновление новыми данными
         for key, value in data.items():
@@ -177,6 +185,15 @@ class CDevicesDB(object):
             result_states.append({'key': 'on_off', 'value': {"type": "BOOL", "bool_value": True}})
             result_states.append({'key': 'temperature', 'value': {"type": "INTEGER", "integer_value": temp}})
             result_states.append({'key': 'hvac_temp_set', 'value': {"type": "INTEGER", "integer_value": 30}})
+
+        elif category == 'vacuum_cleaner':
+            # Статус пылесоса
+            vacuum_status = states.get('vacuum_cleaner_status', 'on_base')
+            result_states.append({'key': 'vacuum_cleaner_status', 'value': {"type": "ENUM", "enum_value": vacuum_status}})
+            # Уровень батареи
+            battery = states.get('battery_percentage')
+            if battery is not None:
+                result_states.append({'key': 'battery_percentage', 'value': {"type": "INTEGER", "integer_value": int(battery)}})
             
         return result_states
 
@@ -334,6 +351,10 @@ class CDevicesDB(object):
                             if feature.get('required', False):
                                 log(f'Отсутствует обязательное состояние: {feature_name}', 1)
                                 device['States'][feature_name] = self.get_default_value_for_feature(feature)
+                        
+                        # Пропускаем пустые ENUM-команды (например, vacuum_cleaner_command='')
+                        if current_val == '' and feature.get('data_type') == 'ENUM' and not feature.get('required', False):
+                            continue
                                 
                         # Добавляем только если значение существует (теперь инициализировано, если обязательно)
                         if device['States'].get(feature_name) is not None:
@@ -352,7 +373,7 @@ class CDevicesDB(object):
             }
             
         self.mqtt_json_states_list = json.dumps(states_payload)
-        log(f"Отправка состояний в Сбер: {self.mqtt_json_states_list[:200]}", 2)
+        log(f"Отправка состояний в Сбер: {self.mqtt_json_states_list}", 2)
         return self.mqtt_json_states_list
 
     def do_http_json_devices_list(self):

@@ -119,6 +119,8 @@ class SberMQTTClient:
                 device_info = self.device_database.devices_registry.get(entity_id, {})
                 if device_info.get('entity_type') == 'climate':
                     self.ha_client.set_climate_temperature(entity_id, state_changes)
+                elif device_info.get('entity_type') == 'vacuum':
+                    self.ha_client.send_vacuum_command(entity_id)
                 elif device_info.get('entity_ha', False):
                     self.ha_client.toggle_device_state(entity_id)
                 else:
