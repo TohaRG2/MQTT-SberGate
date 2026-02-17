@@ -1,7 +1,7 @@
 import os
 import requests
 import json
-from logger import log
+from logger import log_info, log_error, log_warning
 from config import OPTIONS, read_json_file, write_json_file, CATEGORIES_FILE_PATH, update_option
 
 Categories = {}
@@ -15,10 +15,10 @@ def get_sber_auth():
 
 def fetch_models():
     if not os.path.exists('models.json'):
-        log('Файл моделей отсутствует. Получаем...')
+        log_info('Файл моделей отсутствует. Получаем...')
         endpoint = OPTIONS.get('sber-http_api_endpoint')
         if not endpoint:
-            log('sber-http_api_endpoint отсутствует')
+            log_warning('sber-http_api_endpoint отсутствует')
             return
             
         try:
@@ -27,9 +27,9 @@ def fetch_models():
             if SD_Models.status_code == 200:
                 write_json_file('models.json', SD_Models.json())
             else:
-                log('ОШИБКА! Запрос models завершился с ошибкой: ' + str(SD_Models.status_code))
+                log_error('ОШИБКА! Запрос models завершился с ошибкой: ' + str(SD_Models.status_code))
         except Exception as e:
-            log('Исключение при получении моделей: ' + str(e))
+            log_error('Исключение при получении моделей: ' + str(e))
 
 def get_category():
     global Categories
@@ -37,16 +37,16 @@ def get_category():
     
     if not os.path.exists(CATEGORIES_FILE_PATH):
         if not endpoint:
-            log('sber-http_api_endpoint отсутствует, получение категорий невозможно')
+            log_warning('sber-http_api_endpoint отсутствует, получение категорий невозможно')
             return {}
 
-        log('Файл категорий отсутствует. Получаем...')
+        log_info('Файл категорий отсутствует. Получаем...')
         Categories = {}
         try:
             SD_Categories = requests.get(endpoint + '/v1/mqtt-gate/categories', headers=get_sber_headers(),
                                          auth=get_sber_auth()).json()
             for id in SD_Categories['categories']:
-                log('Получаем опции для категории: ' + id)
+                log_info('Получаем опции для категории: ' + id)
                 SD_Features = requests.get(
                     endpoint + '/v1/mqtt-gate/categories/' + id + '/features', headers=get_sber_headers(),
                     auth=get_sber_auth()).json()
@@ -54,10 +54,10 @@ def get_category():
 
             write_json_file(CATEGORIES_FILE_PATH, Categories)
         except Exception as e:
-            log('Ошибка при получении категорий: ' + str(e))
+            log_error('Ошибка при получении категорий: ' + str(e))
             return {}
     else:
-        log('Список категорий получен из файла: ' + CATEGORIES_FILE_PATH)
+        log_info('Список категорий получен из файла: ' + CATEGORIES_FILE_PATH)
         Categories = read_json_file(CATEGORIES_FILE_PATH)
     return Categories
 
@@ -66,9 +66,9 @@ def init_categories():
     Categories = get_category()
 
     if Categories.get('categories', False):
-        log('Старая версия файла категорий, удаляем.')
+        log_info('Старая версия файла категорий, удаляем.')
         os.remove(CATEGORIES_FILE_PATH)
-        log('Повторное получения категорий.')
+        log_info('Повторное получения категорий.')
         Categories = get_category()
 
     # Получаем список категорий в формате Сбер API для возврата по запросу

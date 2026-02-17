@@ -1,8 +1,9 @@
 import json
 import ssl
 import paho.mqtt.client as mqtt
-from logger import log
+from logger import log_info, log_error, log_warning, log_debug, log_deeptrace
 from config import update_option
+from converters import sber_hsv_to_rgb
 
 class SberMQTTClient:
     """
@@ -19,7 +20,7 @@ class SberMQTTClient:
         # Структура топиков SberDevice MQTT
         self.sber_user_login = self.config_options.get('sber-mqtt_login', 'UNKNOWN_USER')
         if self.sber_user_login == 'UNKNOWN_USER':
-            log("КРИТИЧЕСКАЯ ОШИБКА: 'sber-mqtt_login' отсутствует в конфигурации!", 6)
+            log_error("КРИТИЧЕСКАЯ ОШИБКА: 'sber-mqtt_login' отсутствует в конфигурации!")
             
         self.root_topic = f"sberdevices/v1/{self.sber_user_login}"
         self.downlink_topic = f"{self.root_topic}/down"
@@ -34,25 +35,25 @@ class SberMQTTClient:
     def on_connect(self, client, userdata, flags, reason_code):
         """Обработчик успешного подключения к брокеру."""
         if reason_code == 0:
-            log(f"Успешное подключение к брокеру SberDevices (rc: {reason_code})")
+            log_info(f"Успешное подключение к брокеру SberDevices (rc: {reason_code})")
             # Подписка на команды и обновления конфигурации
             client.subscribe(f"{self.downlink_topic}/#", qos=0)
             client.subscribe("sberdevices/v1/__config", qos=0)
         else:
-            log(f"Ошибка подключения к брокеру SberDevices (rc: {reason_code})", 6)
+            log_error(f"Ошибка подключения к брокеру SberDevices (rc: {reason_code})")
 
     def on_disconnect(self, client, userdata, reason_code):
         """Обработчик отключения от брокера."""
         if reason_code != 0:
-            log(f"Неожиданное отключение от MQTT (rc: {reason_code}). Автореконнект включен.", 6)
+            log_error(f"Неожиданное отключение от MQTT (rc: {reason_code}). Автореконнект включен.")
 
     def on_message_received(self, client, userdata, message):
         """Общий обработчик входящих MQTT сообщений."""
-        log(f"MQTT сообщение: {message.topic} (QoS: {message.qos}) -> {message.payload}", 0)
+        log_deeptrace(f"MQTT сообщение: {message.topic} (QoS: {message.qos}) -> {message.payload}")
 
     def on_subscribe_success(self, client, userdata, mid, granted_qos):
         """Обработчик успешной подписки на топик."""
-        log(f"Подписка успешна (MID: {mid}, QoS: {granted_qos})")
+        log_info(f"Подписка успешна (MID: {mid}, QoS: {granted_qos})")
 
     def send_status(self, status_payload):
         """Отправка текущего статуса устройств в Сбер."""
@@ -64,10 +65,10 @@ class SberMQTTClient:
         try:
             command_data = json.loads(message.payload)
         except json.JSONDecodeError:
-            log(f"Ошибка декодирования команды: {message.payload}", 6)
+            log_error(f"Ошибка декодирования команды: {message.payload}")
             return
 
-        log(f"Получена команда от Сбера через MQTT: {command_data}", 2)
+        log_debug(f"Получена команда от Сбера через MQTT: {command_data}")
         
         last_entity_id = None
         for entity_id, device_data in command_data.get('devices', {}).items():
@@ -87,21 +88,20 @@ class SberMQTTClient:
                 elif value_type == 'ENUM':
                     new_value = value_wrapper.get('enum_value', '')
                 elif value_type == 'COLOUR':
-                    # Сбер отправляет цвет в формате HSV: h (0-360), v (0-1000)
-                    import colorsys
+                    # Сбер отправляет цвет в формате HSV: h (0-360), s (0-1000), v (100-1000)
                     colour_value = value_wrapper.get('colour_value', {})
-                    h = colour_value.get('h', 0) / 360.0  # Конвертируем из градусов в 0-1
-                    v = colour_value.get('v', 1000) / 1000.0  # Конвертируем из 0-1000 в 0-1
-                    s = 1.0  # Saturation = 100% (полная насыщенность)
+                    h = colour_value.get('h', 0)
+                    s = colour_value.get('s', 1000)
+                    v = colour_value.get('v', 1000)
                     
                     # Конвертируем HSV в RGB
-                    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+                    r, g, b = sber_hsv_to_rgb(h, s, v)
                     new_value = {
-                        'red': int(r * 255),
-                        'green': int(g * 255),
-                        'blue': int(b * 255)
+                        'red': r,
+                        'green': g,
+                        'blue': b
                     }
-                    log(f"HSV(h={colour_value.get('h')}, v={colour_value.get('v')}) -> RGB({new_value['red']},{new_value['green']},{new_value['blue']})")
+                    log_deeptrace(f"HSV(h={h}, s={s}, v={v}) -> RGB({r},{g},{b})")
 
                 # Отслеживаем, изменилось ли значение на самом деле
                 current_value = self.device_database.get_state(entity_id, key)
@@ -122,7 +122,7 @@ class SberMQTTClient:
                 elif device_info.get('entity_ha', False):
                     self.ha_client.toggle_device_state(entity_id)
                 else:
-                    log(f"Устройство не найдено или не управляется HA: {entity_id}", 3)
+                    log_info(f"Устройство не найдено или не управляется HA: {entity_id}")
         
         # Отправляем подтверждение с обновленным статусом
         if last_entity_id:
@@ -136,13 +136,13 @@ class SberMQTTClient:
         except:
             device_ids = []
             
-        log(f"Получен запрос статуса для: {device_ids}",2)
+        log_debug(f"Получен запрос статуса для: {device_ids}")
         response_payload = self.device_database.do_mqtt_json_states_list(device_ids)
         self.send_status(response_payload)
 
     def handle_config_request(self, client, userdata, message):
         """Обработка запроса конфигурации устройств."""
-        log("Получен запрос конфигурации устройств")
+        log_info("Получен запрос конфигурации устройств")
         config_payload = self.device_database.do_mqtt_json_devices_list()
         self.mqtt_client.publish(f"{self.uplink_topic}/config", config_payload, qos=0)
 
@@ -154,11 +154,11 @@ class SberMQTTClient:
             if endpoint:
                 update_option('sber-http_api_endpoint', endpoint)
         except Exception as e:
-            log(f"Ошибка обработки глобальной конфигурации: {e}", 6)
+            log_error(f"Ошибка обработки глобальной конфигурации: {e}")
 
     def on_mqtt_error(self, client, userdata, message):
         """Обработчик ошибок MQTT."""
-        log(f"Ошибка Sber MQTT: {message.topic} -> {message.payload}", 6)
+        log_error(f"Ошибка Sber MQTT: {message.topic} -> {message.payload}")
 
     def setup_mqtt_client(self):
         """Настройка MQTT клиента: коллбэки, авторизация, TLS."""
@@ -181,7 +181,7 @@ class SberMQTTClient:
         if mqtt_user and mqtt_pass:
             self.mqtt_client.username_pw_set(mqtt_user, mqtt_pass)
         else:
-            log("ПРЕДУПРЕЖДЕНИЕ: Данные MQTT отсутствуют в конфигурации!", 5)
+            log_warning("ПРЕДУПРЕЖДЕНИЕ: Данные MQTT отсутствуют в конфигурации!")
             
         # Сбер использует специфические сертификаты, отключаем проверку для совместимости
         self.mqtt_client.tls_set(certfile=None, keyfile=None, cert_reqs=ssl.CERT_NONE, tls_version=None)
@@ -191,16 +191,16 @@ class SberMQTTClient:
         """Подключение к брокеру и запуск цикла обработки сообщений."""
         broker_host = self.config_options.get('sber-mqtt_broker', 'mqtt.sberdevices.ru')
         broker_port = self.config_options.get('sber-mqtt_broker_port', 8883)
-        log(f"Подключение к брокеру Sber MQTT: {broker_host}:{broker_port}")
+        log_info(f"Подключение к брокеру Sber MQTT: {broker_host}:{broker_port}")
         
         try:
             self.mqtt_client.connect(broker_host, broker_port, keepalive=60)
             self.mqtt_client.loop_start()
         except Exception as e:
-            log(f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось подключиться к Sber MQTT: {e}", 6)
+            log_error(f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось подключиться к Sber MQTT: {e}")
 
     def publish_config(self):
         """Публикация конфигурации всех включенных устройств в Сбер."""
         config_payload = self.device_database.do_mqtt_json_devices_list()
         self.mqtt_client.publish(f"{self.uplink_topic}/config", config_payload, qos=0)
-        log("Конфигурация устройств опубликована в Sber MQTT")
+        log_info("Конфигурация устройств опубликована в Sber MQTT")

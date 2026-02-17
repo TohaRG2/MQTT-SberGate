@@ -5,7 +5,7 @@ import threading
 import re
 import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from logger import log
+from logger import log_info, log_error, log_warning, log_debug
 import sber_api
 
 MIME_TYPES = {
@@ -63,7 +63,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             with open(file_path, 'rb') as f:
                 self.wfile.write(f.read())
         except Exception as e:
-            log(f"Ошибка чтения файла {file_path}: {e}")
+            log_error(f"Ошибка чтения файла {file_path}: {e}")
 
     def handle_root(self):
         self.send_response(200)
@@ -101,7 +101,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_text_response(self.device_database.do_http_json_devices_list(), "application/json")
 
     def handle_api_devices_post(self, post_data):
-        log(f"Сбер Агент добавляет новое устройство: {post_data}")
+        log_info(f"Сбер Агент добавляет новое устройство: {post_data}")
         category = post_data.get('category', '')
         if category:
             new_id = self.device_database.generate_new_id(category)
@@ -111,10 +111,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.mqtt_client.publish_config()
 
     def handle_api_v2_devices_post(self, post_data):
-        log(f"Обновление данных устройств: {post_data['devices']}")
+        log_info(f"Обновление данных устройств: {post_data['devices']}")
         for device_entry in post_data['devices']:
             for entity_id, properties in device_entry.items():
-                log(f"Обновление {entity_id}: {properties}")
+                log_info(f"Обновление {entity_id}: {properties}")
                 self.device_database.update(entity_id, properties)
         self.mqtt_client.publish_config()
         self.device_database.save_db()
@@ -122,13 +122,13 @@ class RequestHandler(BaseHTTPRequestHandler):
     def handle_api_v2_command_post(self, post_data):
         command = post_data.get('command', 'unknown')
         if command == 'DB_delete':
-            log("Запрошено удаление базы данных")
+            log_warning("Запрошено удаление базы данных")
             self.device_database.clear_database()
         elif command == 'exit':
-            log("Запрошена остановка сервера")
+            log_warning("Запрошена остановка сервера")
             sys.exit()
         else:
-            log(f"Получена неизвестная команда: {post_data}")
+            log_warning(f"Получена неизвестная команда: {post_data}")
 
     def handle_api_v2_devices_get(self):
         self.send_text_response(self.device_database.do_http_json_devices_list_full(), "application/json")
@@ -137,13 +137,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_json_response(self.agent_status_data)
 
     def handle_api_categories(self):
-        log('Запрос категорий')
+        log_info('Запрос категорий')
         self.send_json_response(sber_api.resCategories)
 
     def handle_api_proxy_v1(self):
         # Проксирование запроса к HTTP API Сбера
         api_prefix = '/api/v1/'
-        log(f"PROXY {api_prefix}: {self.path}")
+        log_debug(f"PROXY {api_prefix}: {self.path}")
         
         # Фиктивные ответы для несуществующих эндпоинтов Сбера, которые запрашивает старый UI
         if self.path.endswith('/transformations'):
@@ -160,21 +160,21 @@ class RequestHandler(BaseHTTPRequestHandler):
                              self.send_json_response(data)
                     return
                 else:
-                    log(f"Файл {transformations_path} не найден. Возвращаем пустой список.")
+                    log_warning(f"Файл {transformations_path} не найден. Возвращаем пустой список.")
                     self.send_json_response([])
                     return
             except Exception as e:
-                log(f"Ошибка при чтении transformations.json: {e}")
+                log_error(f"Ошибка при чтении transformations.json: {e}")
                 self.send_json_response([])
                 return
 
         if self.path.endswith('/aggregations'):
-            log(f"Возвращаем пустой список для {self.path} (эндпоинт устарел или не существует)")
+            log_warning(f"Возвращаем пустой список для {self.path} (эндпоинт устарел или не существует)")
             self.send_json_response([])
             return
 
         if self.path.endswith('/objects'):
-             log(f"Возвращаем пустой список объектов для {self.path} (эндпоинт устарел или не существует)")
+             log_warning(f"Возвращаем пустой список объектов для {self.path} (эндпоинт устарел или не существует)")
              self.send_json_response({"objects": []})
              return
 
@@ -187,16 +187,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             if response.status_code == 200:
                 self.send_text_response(response.text, "application/json")
             else:
-                log(f"ОШИБКА ПРОКСИ! Запрос {target_url} завершился с кодом: {response.status_code}")
+                log_error(f"ОШИБКА ПРОКСИ! Запрос {target_url} завершился с кодом: {response.status_code}")
         except Exception as e:
-            log(f"Исключение ПРОКСИ: {e}")
+            log_error(f"Исключение ПРОКСИ: {e}")
 
     def do_DELETE(self):
         self.send_json_response({})
         api_prefix = '/api/v1/devices/'
         if self.path.startswith(api_prefix):
             entity_id = self.path[len(api_prefix):]
-            log(f"УДАЛЕНИЕ устройства: {entity_id}")
+            log_info(f"УДАЛЕНИЕ устройства: {entity_id}")
             self.device_database.delete_device(entity_id)
             self.mqtt_client.publish_config()
 
@@ -208,7 +208,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             # Строим полный путь относительно директории приложения
             full_path = os.path.join(APP_DIR, static_file_path)
-            log(f"Отдача файла: {full_path} (MIME: {mime_type})")
+            log_debug(f"Отдача файла: {full_path} (MIME: {mime_type})")
             self.send_static_file(full_path, f"{mime_type}; charset=utf-8")
             return
 
@@ -232,7 +232,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         self.send_json_response({})
-        log(f"PUT: {self.path}")
+        log_debug(f"PUT: {self.path}")
         content_length = int(self.headers['Content-Length'])
         put_data = json.loads(self.rfile.read(content_length))
         
@@ -245,7 +245,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.send_json_response({})
-        log(f"POST: {self.path}")
+        log_debug(f"POST: {self.path}")
         content_length = int(self.headers['Content-Length'])
         post_data = json.loads(self.rfile.read(content_length))
         
@@ -259,7 +259,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if handler:
             handler(post_data)
         else:
-            log(f"Неизвестный POST запрос: {post_data}")
+            log_warning(f"Неизвестный POST запрос: {post_data}")
 
 class WebServer:
     def __init__(self, device_db, mqtt_client, config_options, agent_status):
@@ -279,7 +279,7 @@ class WebServer:
         RequestHandler.agent_status_data = self.agent_status
         
         self.server = HTTPServer((self.host_name, self.server_port), RequestHandler)
-        log(f"Веб-сервер запущен на http://{self.host_name or 'localhost'}:{self.server_port}")
+        log_info(f"Веб-сервер запущен на http://{self.host_name or 'localhost'}:{self.server_port}")
         
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.daemon = True
@@ -289,4 +289,4 @@ class WebServer:
         if self.server:
             self.server.shutdown()
             self.server.server_close()
-            log("Веб-сервер остановлен.")
+            log_info("Веб-сервер остановлен.")

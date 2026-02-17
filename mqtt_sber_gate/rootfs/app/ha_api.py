@@ -2,7 +2,13 @@ import json
 import time
 import requests
 import websocket
-from logger import log
+from logger import log_info, log_debug, log_trace, log_deeptrace, log_warning, log_error, log_fatal
+from converters import (
+    ha_brightness_to_sber,
+    sber_brightness_to_ha,
+    ha_temp_to_sber,
+    sber_temp_to_ha
+)
 
 class HAClient:
     """
@@ -30,7 +36,7 @@ class HAClient:
         """Переключение состояния устройства (вкл/выкл) в Home Assistant."""
         is_on = self.device_database.get_state(entity_id, 'on_off')
         entity_domain, _ = entity_id.split('.', 1)
-        log(f"Отправляем команду в HA для {entity_id} ON: {is_on}")
+        log_info(f"Отправляем команду в HA для {entity_id} ON: {is_on}")
         
         api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
         base_url = f"{api_url}/api/services/{entity_domain}/"
@@ -39,7 +45,7 @@ class HAClient:
         
         if entity_domain == 'button' or entity_domain == 'input_button':
             url = base_url + 'press'
-            log(f"Отправка события press для кнопки {entity_id}", 0)
+            log_deeptrace(f"Отправка события press для кнопки {entity_id}")
         else:
             service = 'turn_on' if is_on else 'turn_off'
             url = base_url + service
@@ -49,11 +55,9 @@ class HAClient:
                 # Яркость
                 brightness_sber = self.device_database.get_state(entity_id, 'light_brightness')
                 if brightness_sber is not None:
-                    # Конвертируем из диапазона Сбера (50-1000) обратно в HA (0-255)
-                    ha_brightness = round(((float(brightness_sber) - 50) / 950.0) * 255)
-                    ha_brightness = max(0, min(255, ha_brightness))
+                    ha_brightness = sber_brightness_to_ha(brightness_sber)
                     payload['brightness'] = ha_brightness
-                    log(f"Добавляем яркость в команду HA для {entity_id}: Сбер:{brightness_sber} -> HA:{ha_brightness}")
+                    log_info(f"Добавляем яркость в команду HA для {entity_id}: Сбер:{brightness_sber} -> HA:{ha_brightness}")
                 
                 # RGB цвет
                 light_colour = self.device_database.get_state(entity_id, 'light_colour')
@@ -63,28 +67,26 @@ class HAClient:
                         light_colour.get('green', 255),
                         light_colour.get('blue', 255)
                     ]
-                    log(f"Добавляем RGB цвет в команду HA для {entity_id}: {payload['rgb_color']}")
+                    log_info(f"Добавляем RGB цвет в команду HA для {entity_id}: {payload['rgb_color']}")
                 
                 # Цветовая температура (только если нет RGB)
                 if 'rgb_color' not in payload:
                     colour_temp_sber = self.device_database.get_state(entity_id, 'light_colour_temp')
                     if colour_temp_sber is not None:
-                        # Конвертация Сбер (0-1000) обратно в mired (153-500)
-                        ha_mireds = round((float(colour_temp_sber) / 1000.0) * (500 - 153) + 153)
-                        ha_mireds = max(153, min(500, ha_mireds))
+                        ha_mireds = sber_temp_to_ha(colour_temp_sber)
                         payload['color_temp'] = ha_mireds
-                        log(f"Добавляем цветовую температуру в команду HA для {entity_id}: Сбер:{colour_temp_sber} -> HA:{ha_mireds} мired")
+                        log_info(f"Добавляем цветовую температуру в команду HA для {entity_id}: Сбер:{colour_temp_sber} -> HA:{ha_mireds} мired")
             
-        log(f"Rest запрос в HA: {url} Данные: {payload}", 2)
+        log_debug(f"Rest запрос в HA: {url} Данные: {payload}")
         requests.post(url, json=payload, headers=self.get_api_headers())
 
     def set_climate_temperature(self, entity_id, changes):
         """Установка целевой температуры для климатических устройств в Home Assistant."""
         entity_domain, _ = entity_id.split('.', 1)
-        log(f"Отправляем команду в HA для {entity_id} Climate: ")
+        log_info(f"Отправляем команду в HA для {entity_id} Climate: ")
         api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
         url = f"{api_url}/api/services/{entity_domain}/set_temperature"
-        log(f"Rest запрос в HA: {url}", 2)
+        log_debug(f"Rest запрос в HA: {url}")
         
         target_temp = self.device_database.get_state(entity_id, 'hvac_temp_set')
         is_on = self.device_database.get_state(entity_id, 'on_off')
@@ -98,7 +100,7 @@ class HAClient:
 
     def toggle_switch_state(self, entity_id, should_turn_on):
         """Управление переключателем в Home Assistant."""
-        log(f"Отправляем команду в HA для {entity_id} ON: {should_turn_on}")
+        log_info(f"Отправляем команду в HA для {entity_id} ON: {should_turn_on}")
         service = 'turn_on' if should_turn_on else 'turn_off'
         api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
         url = f"{api_url}/api/services/switch/{service}"
@@ -106,7 +108,7 @@ class HAClient:
 
     def execute_script(self, entity_id, should_turn_on):
         """Запуск/остановка скрипта в Home Assistant."""
-        log(f"Отправляем команду в HA для {entity_id} ON: {should_turn_on}")
+        log_info(f"Отправляем команду в HA для {entity_id} ON: {should_turn_on}")
         service = 'turn_on' if should_turn_on else 'turn_off'
         api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
         url = f"{api_url}/api/services/script/{service}"
@@ -116,7 +118,7 @@ class HAClient:
     def update_switch_entity(self, entity_id, state_data):
         """Обновление сущности типа 'переключатель' (switch)."""
         friendly_name = state_data['attributes'].get('friendly_name', '')
-        log(f"переключатель (switch): {entity_id} {friendly_name}", 0)
+        log_deeptrace(f"переключатель (switch): {entity_id} {friendly_name}")
         self.device_database.update(entity_id, {
             'entity_ha': True,
             'entity_type': 'switch',
@@ -129,7 +131,7 @@ class HAClient:
     def update_light_entity(self, entity_id, state_data):
         """Обновление сущности типа 'свет' (light)."""
         friendly_name = state_data['attributes'].get('friendly_name', '')
-        log(f"свет (light): {entity_id} {friendly_name}", 0)
+        log_deeptrace(f"свет (light): {entity_id} {friendly_name}")
         self.device_database.update(entity_id, {
             'entity_ha': True,
             'entity_type': 'light',
@@ -142,9 +144,7 @@ class HAClient:
         # Обработка яркости
         brightness = state_data['attributes'].get('brightness')
         if brightness is not None:
-            # Конвертируем из HA (0-255) в диапазон Сбера (50-1000)
-            # Формула: sber = 50 + (ha * 950 / 255)
-            sber_brightness = round(50 + (float(brightness) / 255.0) * 950)
+            sber_brightness = ha_brightness_to_sber(brightness)
             self.device_database.change_state(entity_id, 'light_brightness', sber_brightness)
         
         # Обработка RGB цвета
@@ -164,11 +164,7 @@ class HAClient:
         if 'color_temp' in supported_color_modes:
             color_temp = state_data['attributes'].get('color_temp')
             if color_temp is not None:
-                # Конвертация mired (153-500) в Сбер (0-1000)
-                # 153 mired (холодный ~6500K) -> 0
-                # 500 mired (теплый ~2000K) -> 1000
-                sber_temp = round(((color_temp - 153) / (500 - 153)) * 1000)
-                sber_temp = max(0, min(1000, sber_temp))
+                sber_temp = ha_temp_to_sber(color_temp)
                 self.device_database.change_state(entity_id, 'light_colour_temp', sber_temp)
                 # Если нет RGB, то режим белый
                 if not self.device_database.get_state(entity_id, 'light_colour'):
@@ -177,7 +173,7 @@ class HAClient:
     def update_script_entity(self, entity_id, state_data):
         """Обновление сущности типа 'скрипт' (script)."""
         friendly_name = state_data['attributes'].get('friendly_name', '')
-        log(f"скрипт (script): {entity_id} {friendly_name}", 0)
+        log_deeptrace(f"скрипт (script): {entity_id} {friendly_name}")
         self.device_database.update(entity_id, {
             'entity_ha': True,
             'entity_type': 'scr',
@@ -220,7 +216,7 @@ class HAClient:
         """Обновление сущности типа 'кнопка' (button)."""
         device_class = state_data['attributes'].get('device_class', '')
         friendly_name = state_data['attributes'].get('friendly_name', '')
-        log(f"кнопка (button): {entity_id} {friendly_name}({device_class})", 0)
+        log_deeptrace(f"кнопка (button): {entity_id} {friendly_name}({device_class})")
         self.device_database.update(entity_id, {
             'entity_ha': True,
             'entity_type': 'button',
@@ -232,7 +228,7 @@ class HAClient:
         """Обновление сущности типа 'переключатель' (input_boolean)."""
         device_class = state_data['attributes'].get('device_class', '')
         friendly_name = state_data['attributes'].get('friendly_name', '')
-        log(f"input_boolean: {entity_id} {friendly_name}({device_class})", 0)
+        log_deeptrace(f"input_boolean: {entity_id} {friendly_name}({device_class})")
         self.device_database.update(entity_id, {
             'entity_ha': True,
             'entity_type': 'input_boolean',
@@ -244,7 +240,7 @@ class HAClient:
         """Обновление сущности типа 'кнопка' (input_button)."""
         device_class = state_data['attributes'].get('device_class', '')
         friendly_name = state_data['attributes'].get('friendly_name', '')
-        log(f"input_button: {entity_id} {friendly_name}({device_class})", 0)
+        log_deeptrace(f"input_button: {entity_id} {friendly_name}({device_class})")
         self.device_database.update(entity_id, {
             'entity_ha': True,
             'entity_type': 'input_button',
@@ -256,7 +252,7 @@ class HAClient:
         """Обновление сущности типа 'климат' (climate)."""
         device_class = state_data['attributes'].get('device_class', '')
         friendly_name = state_data['attributes'].get('friendly_name', '')
-        log(f"климат (climate): {entity_id} {friendly_name}({device_class})", 0)
+        log_deeptrace(f"климат (climate): {entity_id} {friendly_name}({device_class})")
         self.device_database.update(entity_id, {
             'entity_ha': True,
             'entity_type': 'climate',
@@ -278,14 +274,14 @@ class HAClient:
 
     def update_default_entity(self, entity_id, state_data):
         """Обработчик по умолчанию для неиспользуемых типов сущностей."""
-        log(f"Неиспользуемый тип: {entity_id}", 0)
+        log_deeptrace(f"Неиспользуемый тип: {entity_id}")
         pass
 
     def initialize_entities_via_rest(self):
         """Первоначальная загрузка всех сущностей из HA через REST API."""
         api_url = self.config_options.get('ha-api_url', 'http://supervisor/core')
         url = f"{api_url}/api/states"
-        log(f"Подключаемся к HA, (ha-api_url: {api_url})", 3)
+        log_info(f"Подключаемся к HA, (ha-api_url: {api_url})")
         
         attempt = 0
         response = None
@@ -295,17 +291,17 @@ class HAClient:
                 response = requests.get(url, headers=self.get_api_headers())
                 break
             except Exception:
-                log(f"Ошибка подключения к HA. Ждём 5 сек перед повторным подключением. Попытка {attempt}", 6)
+                log_error(f"Ошибка подключения к HA. Ждём 5 сек перед повторным подключением. Попытка {attempt}")
                 time.sleep(5)
         
         if response and response.status_code == 200:
-            log('Запрос устройств из Home Assistant выполнен штатно. Обрабатываем полученный список')
+            log_info('Запрос устройств из Home Assistant выполнен штатно. Обрабатываем полученный список')
             ha_entities = response.json()
-            log(ha_entities, 0)
+            log_deeptrace(ha_entities)
         else:
-            log('ОШИБКА! Запрос устройств из Home Assistant выполнен некорректно.', 6)
+            log_error('ОШИБКА! Запрос устройств из Home Assistant выполнен некорректно.')
             if response:
-                log(f"Код ответа сервера: {response.status_code}", 6)
+                log_error(f"Код ответа сервера: {response.status_code}")
             ha_entities = []
 
         update_handlers = {
@@ -360,15 +356,15 @@ class HAClient:
     # Методы WebSocket
     def on_websocket_open(self, ws):
         """Обработчик открытия WebSocket соединения."""
-        log("WebSocket: соединение открыто", 3)
+        log_info("WebSocket: соединение открыто")
 
     def on_websocket_close(self, ws, close_status_code, close_msg):
         """Обработчик закрытия WebSocket соединения."""
-        log("WebSocket: соединение закрыто", 3)
+        log_info("WebSocket: соединение закрыто")
 
     def on_websocket_message(self, ws, message):
         """Обработчик входящих сообщений WebSocket."""
-        log(f"WebSocket: получено сообщение: {message}", 0)
+        log_deeptrace(f"WebSocket: получено сообщение: {message}")
         message_data = json.loads(message)
         
         message_handlers = {
@@ -384,7 +380,7 @@ class HAClient:
 
     def handle_auth_required(self, ws, message_data):
         """Обработка запроса авторизации WebSocket."""
-        log("WebSocket: требуется авторизация")
+        log_info("WebSocket: требуется авторизация")
         token = self.config_options.get('ha-api_token', '')
         try:
             ws.send(json.dumps({
@@ -392,37 +388,37 @@ class HAClient:
                 "access_token": token
             }))
         except Exception as e:
-            log(f"Ошибка отправки auth через WebSocket: {e}", 6)
+            log_error(f"Ошибка отправки auth через WebSocket: {e}")
 
     def handle_auth_ok(self, ws, message_data):
         """Обработка успешной авторизации WebSocket."""
-        log("WebSocket: авторизация успешна")
+        log_info("WebSocket: авторизация успешна")
         try:
             ws.send(json.dumps({'id': 1, 'type': 'subscribe_events', 'event_type': 'state_changed'}))
             ws.send(json.dumps({'id': 2, 'type': 'config/area_registry/list'}))
             ws.send(json.dumps({'id': 3, 'type': 'config/device_registry/list'}))
             ws.send(json.dumps({'id': 4, 'type': 'config/entity_registry/list'}))
         except Exception as e:
-            log(f"Ошибка отправки команд через WebSocket: {e}", 6)
+            log_error(f"Ошибка отправки команд через WebSocket: {e}")
 
     def handle_auth_invalid(self, ws, message_data):
         """Обработка ошибки авторизации WebSocket."""
-        log("WebSocket: ошибка авторизации, проверьте токен (ha-api_token)", 7)
+        log_fatal("WebSocket: ошибка авторизации, проверьте токен (ha-api_token)")
 
     def handle_websocket_result(self, ws, message_data):
         """Обработка результатов выполнения запросов WebSocket."""
-        log(f"WebSocket: результат: {message_data}", 0)
+        log_deeptrace(f"WebSocket: результат: {message_data}")
         request_id = message_data.get('id')
 
         if request_id == 2:
-            log(f"WebSocket: Получен список зон (areas): {message_data}", 0)
+            log_deeptrace(f"WebSocket: Получен список зон (areas): {message_data}")
             self.areas_registry = {}
             for area in message_data.get('result', []):
                 self.areas_registry[area['area_id']] = area['name']
-            log(f"ЗОНЫ HA: {self.areas_registry}", 1)
+            log_trace(f"ЗОНЫ HA: {self.areas_registry}")
 
         elif request_id == 3:
-            log(f"WebSocket: Получен список устройств (device_registry): {message_data}", 0)
+            log_deeptrace(f"WebSocket: Получен список устройств (device_registry): {message_data}")
             self.devices_registry = {}
             for device in message_data.get('result', []):
                 device_id = device['id']
@@ -431,10 +427,10 @@ class HAClient:
                     'name': device.get('name') or device.get('name_by_user') or 'Unknown',
                     'area_id': device.get('area_id', 'Unknown')
                 }
-            log(f"ОБНОВЛЕНИЕ УСТРОЙСТВ HA: найдено {len(self.devices_registry)} устройств", 1)
+            log_trace(f"ОБНОВЛЕНИЕ УСТРОЙСТВ HA: найдено {len(self.devices_registry)} устройств")
 
         elif request_id == 4:
-            log("WebSocket: Получен список сущностей (entities).", 0)
+            log_deeptrace("WebSocket: Получен список сущностей (entities).")
             for entity in message_data.get('result', []):
                 entity_id = entity['entity_id']
                 db_entity = self.device_database.devices_registry.get(entity_id)
@@ -459,7 +455,7 @@ class HAClient:
                     })
 
                 if current_room_in_db != room_name:
-                    log(f"Изменилось расположение сущности {entity_id} с '{current_room_in_db}' на '{room_name}'")
+                    log_info(f"Изменилось расположение сущности {entity_id} с '{current_room_in_db}' на '{room_name}'")
                     self.device_database.update(entity_id, {
                         'entity_ha': True,
                         'room': room_name
@@ -477,6 +473,13 @@ class HAClient:
         
         device_entry = self.device_database.devices_registry.get(entity_id)
         
+        # Логирование нового состояния от HA
+        is_active = device_entry and device_entry.get('enabled', False)
+        if is_active:
+            log_debug(f"!Получено новое состояние от HA для: {entity_id} {old_state} -> {new_state}")
+        else:
+            log_deeptrace(f"Получено новое состояние от HA для какого-то: {entity_id} {old_state} -> {new_state}")
+
         if device_entry:
             device_class = event_data['new_state']['attributes'].get('device_class', '')
             current_device_id = device_entry.get('device_id')
@@ -529,7 +532,7 @@ class HAClient:
                 if device_entry.get('entity_type') == 'button':
                     # Для кнопки просто игнорируем, если ожидаем реакцию
                     if expected_state is not None:
-                        log(f"Игнорируем эхо кнопки {entity_id}", 0)
+                        log_deeptrace(f"Игнорируем эхо кнопки {entity_id}")
                         device_entry.pop('_expected_mqtt_state', None)
                         return
                         
@@ -552,32 +555,31 @@ class HAClient:
                         # Мы просто сбрасываем ожидание, но НЕ отправляем обновление в Сбер,
                         # так как Сбер и так знает это состояние (он его и прислал)
                         if is_on == expected_state:
-                            log(f"Получено ожидаемое состояние {is_on} для {entity_id}. Эхо подавлено.", 0)
+                            log_deeptrace(f"Получено ожидаемое состояние {is_on} для {entity_id}. Эхо подавлено.")
                             device_entry.pop('_expected_mqtt_state', None)
                             return
                         else:
                             # Пришло промежуточное состояние (не то, что ждали)
                             # Игнорируем его, ждем правильного
-                            log(f"Игнорируем промежуточное состояние {is_on} для {entity_id} (ждем {expected_state})", 0)
+                            log_deeptrace(f"Игнорируем промежуточное состояние {is_on} для {entity_id} (ждем {expected_state})")
                             return
 
                     # Штатная обработка изменений (ручное управление)
                     current_on_off = self.device_database.get_state(entity_id, 'on_off')
                     if is_on != current_on_off:
                         # Проверка на дребезг контактов (игнорируем мгновенные переключения)
-                        import time
                         last_change = device_entry.get('_last_state_change_ts', 0)
                         now = time.time()
                         
                         # Если состояние меняется слишком быстро (<0.5 сек) и это не ожидаемая команда
                         if now - last_change < 0.5:
-                             log(f"Игнорируем слишком частое переключение {entity_id}", 0)
+                             log_deeptrace(f"Игнорируем слишком частое переключение {entity_id}")
                              return
 
                         device_entry['_last_state_change_ts'] = now
                         self.device_database.change_state(entity_id, 'on_off', is_on)
                     else:
-                         log(f"Состояние {entity_id} не изменилось ({is_on}), пропускаем обновление Сбера", 0)
+                         log_deeptrace(f"Состояние {entity_id} не изменилось ({is_on}), пропускаем обновление Сбера")
                          return
                 
                 # Обновление параметров для света
@@ -587,7 +589,7 @@ class HAClient:
                     # Яркость
                     brightness = attributes.get('brightness')
                     if brightness is not None:
-                        sber_brightness = round(50 + (float(brightness) / 255.0) * 950)
+                        sber_brightness = ha_brightness_to_sber(brightness)
                         self.device_database.change_state(entity_id, 'light_brightness', sber_brightness)
                     
                     # RGB цвет
@@ -603,8 +605,7 @@ class HAClient:
                     # Цветовая температура
                     color_temp = attributes.get('color_temp')
                     if color_temp is not None:
-                        sber_temp = round(((color_temp - 153) / (500 - 153)) * 1000)
-                        sber_temp = max(0, min(1000, sber_temp))
+                        sber_temp = ha_temp_to_sber(color_temp)
                         self.device_database.change_state(entity_id, 'light_colour_temp', sber_temp)
                         # Если нет RGB, то режим белый
                         if not self.device_database.get_state(entity_id, 'light_colour'):
@@ -629,12 +630,12 @@ class HAClient:
 
         while True:
             try:
-                log(f"WebSocket: попытка подключения к {websocket_url}", 3)
+                log_info(f"WebSocket: попытка подключения к {websocket_url}")
                 self.websocket_client = websocket.WebSocketApp(
                     websocket_url,
                     on_open=self.on_websocket_open,
                     on_message=self.on_websocket_message,
-                    on_error=lambda ws, err: log(f"WebSocket: ошибка: {err}", 6),
+                    on_error=lambda ws, err: log_error(f"WebSocket: ошибка: {err}"),
                     on_close=self.on_websocket_close
                 )
                 # Запускаем с ping_interval для поддержания соединения
@@ -643,11 +644,11 @@ class HAClient:
                 # ping_payload - данные для ping (должны быть строкой или байтами)
                 self.websocket_client.run_forever(
                     ping_interval=30,
-                    ping_timeout=2,
+                    ping_timeout=3,
                     ping_payload=b'ping'
                 )
             except Exception as e:
-                log(f"WebSocket: критическая ошибка: {e}", 7)
+                log_fatal(f"WebSocket: критическая ошибка: {e}")
             
-            log("WebSocket: переподключение через 5 секунд...", 3)
+            log_info("WebSocket: переподключение через 5 секунд...")
             time.sleep(5)

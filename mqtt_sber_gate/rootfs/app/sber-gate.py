@@ -1,10 +1,13 @@
-﻿#!/usr/bin/python3
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 import os
 import sys
 import time
-from logger import log, set_log_level, check_log_file_size, LOG_FILE
+from logger import (
+    log_info, log_warning, log_debug, log_error, log_trace, log_deeptrace,
+    set_log_level, check_log_file_size, LOG_FILE
+)
 from config import OPTIONS, DEVICES_DB_FILE_PATH, write_json_file, VERSION, update_option
 from devices_db import CDevicesDB
 from ha_api import HAClient
@@ -19,22 +22,22 @@ set_log_level(current_log_level)
 # Проверка размера лог-файла
 check_log_file_size()
 
-log(f"Запуск MQTT SberGate IoT Agent для Home Assistant, версия: {VERSION}")
-log(f"Операционная система: {os.name}")
-log(f"Версия Python: {sys.version}")
-log(f"Путь к скрипту: {os.path.realpath(__file__)}")
-log(f"Текущая директория: {os.getcwd()}")
-log(f"Размер файла лога: {os.path.getsize(LOG_FILE)} байт")
-log(f"Уровень логирования: {current_log_level}")
-log(f"Кодировка по умолчанию: {sys.getdefaultencoding()}")
-log(f"Файлы в директории: {os.listdir('.')}")
+log_warning(f"Запуск MQTT SberGate IoT Agent для Home Assistant, версия: {VERSION}")
+log_info(f"Операционная система: {os.name}")
+log_info(f"Версия Python: {sys.version}")
+log_info(f"Путь к скрипту: {os.path.realpath(__file__)}")
+log_info(f"Текущая директория: {os.getcwd()}")
+log_info(f"Размер файла лога: {os.path.getsize(LOG_FILE)} байт")
+log_info(f"Уровень логирования: {current_log_level}")
+log_debug(f"Кодировка по умолчанию: {sys.getdefaultencoding()}")
+log_debug(f"Файлы в директории: {os.listdir('.')}")
 
 # Проверка существования базы данных устройств
 if not os.path.exists(DEVICES_DB_FILE_PATH):
-    log(f"Файл базы данных не найден, создаем новый: {DEVICES_DB_FILE_PATH}")
+    log_info(f"Файл базы данных не найден, создаем новый: {DEVICES_DB_FILE_PATH}")
     write_json_file(DEVICES_DB_FILE_PATH, {})
 
-log('Загрузка базы данных устройств из devices.json', 3)
+log_info(f"Загрузка базы данных устройств из devices.json")
 device_db_manager = CDevicesDB(DEVICES_DB_FILE_PATH)
 
 # Инициализация MQTT клиента Сбера
@@ -57,10 +60,10 @@ if OPTIONS.get('sber-http_api_endpoint', None) is None:
     update_option('sber-http_api_endpoint', '')
 
 while not OPTIONS['sber-http_api_endpoint']:
-    log('Ожидание http_api_endpoint от SberDevice...')
+    log_deeptrace('Ожидание http_api_endpoint от SberDevice...')
     time.sleep(1)
 
-log(f"Получен http_api_endpoint от SberDevice: {OPTIONS['sber-http_api_endpoint']}")
+log_trace(f"Получен http_api_endpoint от SberDevice: {OPTIONS['sber-http_api_endpoint']}")
 
 # Загрузка моделей и инициализация категорий
 sber_api.fetch_models()
@@ -86,15 +89,15 @@ api_web_server.start()
 
 # Запуск WebSocket клиента Home Assistant (блокирующая операция)
 try:
-    log("Запуск прослушивания WebSocket Home Assistant...")
+    log_info("Запуск прослушивания WebSocket Home Assistant...")
     ha_integration_client.run_websocket_client()
 except KeyboardInterrupt:
-    log("Агент получил сигнал остановки")
+    log_warning("Агент получил сигнал остановки")
 finally:
-    log("Остановка веб-сервера API...")
+    log_error("Остановка веб-сервера API...")
     api_web_server.stop()
 
 # Основной цикл (если WebSocket завершится)
 while True:
     time.sleep(10)
-    log('Проверка работоспособности агента (Heartbeat)')
+    log_deeptrace('Проверка работоспособности агента (Heartbeat)')

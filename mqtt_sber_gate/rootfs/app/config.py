@@ -1,8 +1,8 @@
 import json
 import os
-from logger import log
+from logger import log_info, log_error
 
-VERSION = '2.0.2'
+VERSION = '2.0.7'
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 # В Home Assistant конфигурация аддона (options.json) всегда находится в /data
@@ -25,7 +25,7 @@ def read_json_file(file_path):
         result = json.loads(data)
     except Exception as e:
         result = {}
-        log(f'!!! Ошибка чтения или разбора файла {file_path}: {e}')
+        log_error(f'!!! Ошибка чтения или разбора файла {file_path}: {e}')
     return result
 
 def write_json_file(file_path, data):
@@ -40,10 +40,12 @@ def load_options():
 def update_option(key, value):
     current_value = OPTIONS.get(key, None)
     if current_value is None:
-        log('В настройках отсутствует параметр: ' + key + ' (добавляю.)')
-    if current_value != value:
+        log_info(f'В настройках отсутствует параметр: {key} (добавляю.)')
         OPTIONS[key] = value
-        log('В настройках изменился параметр: ' + key + ' с ' + str(current_value) + ' на ' + str(value) + ' (обновляю и сохраняю).')
+        write_json_file(OPTIONS_FILE_PATH, OPTIONS)
+    elif current_value != value:
+        log_info(f'В настройках изменился параметр: {key} с {current_value} на {value} (обновляю и сохраняю).')
+        OPTIONS[key] = value
         write_json_file(OPTIONS_FILE_PATH, OPTIONS)
 
 # Автоматическая загрузка настроек при импорте
