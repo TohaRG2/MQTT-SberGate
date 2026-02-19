@@ -15,9 +15,10 @@ class HAClient:
     Клиент для взаимодействия с Home Assistant через REST API и WebSocket.
     Обеспечивает синхронизацию состояний устройств и управление ими.
     """
-    def __init__(self, devices_db, options, publish_status_callback):
+    def __init__(self, devices_db, sber_serializer, options, publish_status_callback):
         """Инициализация клиента HA."""
         self.device_database = devices_db
+        self.sber_serializer = sber_serializer
         self.config_options = options
         self.publish_status_callback = publish_status_callback
         self.areas_registry = {}
@@ -421,7 +422,7 @@ class HAClient:
                                         other_entity_id != entity_id):
                                         self.device_database.change_state(other_entity_id, key, value)
                                         if other_device.get('enabled', False):
-                                            payload = self.device_database.do_mqtt_json_states_list([other_entity_id])
+                                            payload = self.sber_serializer.build_mqtt_states_payload([other_entity_id])
                                             self.publish_status_callback(payload)
                     except (ValueError, TypeError):
                         pass
@@ -525,7 +526,7 @@ class HAClient:
 
             # Публикация в Сбер, если устройство активно
             if is_enabled:
-                payload = self.device_database.do_mqtt_json_states_list([entity_id])
+                payload = self.sber_serializer.build_mqtt_states_payload([entity_id])
                 self.publish_status_callback(payload)
 
     def handle_websocket_default(self, ws, message_data):

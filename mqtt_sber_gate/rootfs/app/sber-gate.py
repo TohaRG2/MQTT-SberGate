@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+﻿#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 import os
@@ -9,7 +9,9 @@ from logger import (
     set_log_level, check_log_file_size, LOG_FILE
 )
 from config import OPTIONS, DEVICES_DB_FILE_PATH, write_json_file, VERSION, update_option
-from devices_db import CDevicesDB
+from devices_db import DevicesDB
+from sber_serializer import SberMQTTSerializer
+from http_serializer import HttpSerializer
 from ha_api import HAClient
 from mqtt_client import SberMQTTClient
 from web_server import WebServer
@@ -38,13 +40,15 @@ if not os.path.exists(DEVICES_DB_FILE_PATH):
     write_json_file(DEVICES_DB_FILE_PATH, {})
 
 log_info(f"Загрузка базы данных устройств из devices.json")
-device_db_manager = CDevicesDB(DEVICES_DB_FILE_PATH)
+device_db_manager = DevicesDB(DEVICES_DB_FILE_PATH)
+sber_serializer = SberMQTTSerializer(device_db_manager)
+http_serializer = HttpSerializer(device_db_manager)
 
 # Инициализация MQTT клиента Сбера
-sber_mqtt_handler = SberMQTTClient(device_db_manager, OPTIONS)
+sber_mqtt_handler = SberMQTTClient(device_db_manager, sber_serializer, OPTIONS)
 
 # Инициализация клиента Home Assistant
-ha_integration_client = HAClient(device_db_manager, OPTIONS, sber_mqtt_handler.send_status)
+ha_integration_client = HAClient(device_db_manager, sber_serializer, OPTIONS, sber_mqtt_handler.send_status)
 
 # Связывание MQTT клиента с клиентом HA
 sber_mqtt_handler.set_ha_client(ha_integration_client)
@@ -84,7 +88,7 @@ agent_status_report = {
 }
 
 # Запуск веб-сервера для управления и мониторинга
-api_web_server = WebServer(device_db_manager, sber_mqtt_handler, OPTIONS, agent_status_report)
+api_web_server = WebServer(device_db_manager, sber_mqtt_handler, http_serializer, OPTIONS, agent_status_report)
 api_web_server.start()
 
 # Запуск WebSocket клиента Home Assistant (блокирующая операция)

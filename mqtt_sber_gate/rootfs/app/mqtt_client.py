@@ -10,9 +10,10 @@ class SberMQTTClient:
     Клиент для взаимодействия с MQTT-брокером Сбера.
     Обеспечивает получение команд и отправку состояний устройств.
     """
-    def __init__(self, device_database, config_options):
+    def __init__(self, device_database, sber_serializer, config_options):
         """Инициализация MQTT клиента Сбера."""
         self.device_database = device_database
+        self.sber_serializer = sber_serializer
         self.config_options = config_options
         self.ha_client = None  # Устанавливается через set_ha_client
         self.mqtt_client = mqtt.Client()
@@ -126,7 +127,7 @@ class SberMQTTClient:
         
         # Отправляем подтверждение с обновленным статусом
         if last_entity_id:
-            self.send_status(self.device_database.do_mqtt_json_states_list([last_entity_id]))
+            self.send_status(self.sber_serializer.build_mqtt_states_payload([last_entity_id]))
 
     def handle_status_request(self, client, userdata, message):
         """Обработка запроса текущего состояния устройств."""
@@ -137,13 +138,13 @@ class SberMQTTClient:
             device_ids = []
             
         log_debug(f"Получен запрос статуса для: {device_ids}")
-        response_payload = self.device_database.do_mqtt_json_states_list(device_ids)
+        response_payload = self.sber_serializer.build_mqtt_states_payload(device_ids)
         self.send_status(response_payload)
 
     def handle_config_request(self, client, userdata, message):
         """Обработка запроса конфигурации устройств."""
         log_info("Получен запрос конфигурации устройств")
-        config_payload = self.device_database.do_mqtt_json_devices_list()
+        config_payload = self.sber_serializer.build_mqtt_devices_payload()
         self.mqtt_client.publish(f"{self.uplink_topic}/config", config_payload, qos=0)
 
     def handle_global_config(self, client, userdata, message):
@@ -201,6 +202,6 @@ class SberMQTTClient:
 
     def publish_config(self):
         """Публикация конфигурации всех включенных устройств в Сбер."""
-        config_payload = self.device_database.do_mqtt_json_devices_list()
+        config_payload = self.sber_serializer.build_mqtt_devices_payload()
         self.mqtt_client.publish(f"{self.uplink_topic}/config", config_payload, qos=0)
         log_info("Конфигурация устройств опубликована в Sber MQTT")

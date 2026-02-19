@@ -40,6 +40,7 @@ STATIC_ROUTES = {
 class RequestHandler(BaseHTTPRequestHandler):
     device_database = None
     mqtt_client = None
+    http_serializer = None
     config_options = None
     agent_status_data = {}
 
@@ -98,7 +99,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_json_response(models_data)
 
     def handle_api_devices_get(self):
-        self.send_text_response(self.device_database.do_http_json_devices_list(), "application/json")
+        self.send_text_response(self.http_serializer.build_http_devices_list(), "application/json")
 
     def handle_api_devices_post(self, post_data):
         log_info(f"Сбер Агент добавляет новое устройство: {post_data}")
@@ -131,7 +132,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             log_warning(f"Получена неизвестная команда: {post_data}")
 
     def handle_api_v2_devices_get(self):
-        self.send_text_response(self.device_database.do_http_json_devices_list_full(), "application/json")
+        self.send_text_response(self.http_serializer.build_http_devices_list_full(), "application/json")
 
     def handle_api_status(self):
         self.send_json_response(self.agent_status_data)
@@ -262,9 +263,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             log_warning(f"Неизвестный POST запрос: {post_data}")
 
 class WebServer:
-    def __init__(self, device_db, mqtt_client, config_options, agent_status):
+    def __init__(self, device_db, mqtt_client, http_serializer, config_options, agent_status):
         self.device_db = device_db
         self.mqtt_client = mqtt_client
+        self.http_serializer = http_serializer
         self.config_options = config_options
         self.agent_status = agent_status
         self.host_name = ''
@@ -275,6 +277,7 @@ class WebServer:
     def start(self):
         RequestHandler.device_database = self.device_db
         RequestHandler.mqtt_client = self.mqtt_client
+        RequestHandler.http_serializer = self.http_serializer
         RequestHandler.config_options = self.config_options
         RequestHandler.agent_status_data = self.agent_status
         
