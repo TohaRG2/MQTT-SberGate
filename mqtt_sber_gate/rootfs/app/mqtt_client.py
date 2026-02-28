@@ -120,6 +120,13 @@ class SberMQTTClient:
                 device_info = self.device_database.devices_registry.get(entity_id, {})
                 if device_info.get('entity_type') == 'climate':
                     self.ha_client.set_climate_temperature(entity_id, state_changes)
+                elif device_info.get('entity_type') == 'vacuum':
+                    # Команды пылесоса приходят как vacuum_cleaner_command
+                    vacuum_command = self.device_database.get_state(entity_id, 'vacuum_cleaner_command')
+                    if vacuum_command:
+                        self.ha_client.send_vacuum_command(entity_id, vacuum_command)
+                    else:
+                        log_warning(f"Получена команда пылесосу {entity_id}, но vacuum_cleaner_command пуст")
                 elif device_info.get('entity_ha', False):
                     self.ha_client.toggle_device_state(entity_id)
                 else:

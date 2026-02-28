@@ -76,12 +76,16 @@ sber_api.init_categories()
 # Публикация конфигурации устройств в MQTT
 sber_mqtt_handler.publish_config()
 
+# Публикация текущих состояний всех устройств — чтобы Салют знал актуальное состояние с первого момента
+log_info("Публикация начальных состояний устройств в Сбер...")
+sber_mqtt_handler.send_status(sber_serializer.build_mqtt_states_payload())
+
 # Текущий статус агента
 agent_status_report = {
-    "online": True, 
-    "error": "", 
+    "online": True,
+    "error": "",
     "credentials": {
-        'username': OPTIONS.get('sber-mqtt_login', 'UNKNOWN'), 
+        'username': OPTIONS.get('sber-mqtt_login', 'UNKNOWN'),
         "password": "***",
         'broker': OPTIONS.get('sber-mqtt_broker', 'UNKNOWN')
     }

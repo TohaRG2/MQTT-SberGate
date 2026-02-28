@@ -4,11 +4,13 @@ from config import VERSION
 from converters import rgb_to_sber_hsv
 from logger import log_debug, log_error, log_deeptrace, log_trace, log_warning
 
+
 class SberMQTTSerializer:
     """
     Сериализатор для формирования payload MQTT сообщений Сбера.
     Отвечает за преобразование данных устройств в формат, понятный Сберу.
     """
+
     def __init__(self, devices_db):
         self.devices_db = devices_db
 
@@ -149,6 +151,11 @@ class SberMQTTSerializer:
         Генерация JSON для обновлений состояния в Sber MQTT.
         Оптимизированная версия: объединяет проверку обязательных полей и форматирование в один проход.
         """
+        # Функции, которые Сбер присылает нам как команды управления.
+        # Их не нужно включать в статусные обновления — Сбер и так знает их значение,
+        # поскольку сам их и устанавливает.
+        COMMAND_ONLY_FEATURES = {'vacuum_cleaner_command'}
+
         states_payload = {'devices': {}}
 
         if entity_id_list is None:
@@ -157,7 +164,7 @@ class SberMQTTSerializer:
 
         for entity_id in entity_id_list:
             device = self.devices_db.get_device(entity_id)
-            
+
             # Пропускаем отключенные или несуществующие устройства
             if not device or not device.get('enabled'):
                 continue
@@ -172,15 +179,20 @@ class SberMQTTSerializer:
                 continue
 
             formatted_states = []
-            
+
             for feature in features:
                 feature_name = feature['name']
+
+                # Пропускаем функции-команды — они не должны включаться в статусные обновления
+                if feature_name in COMMAND_ONLY_FEATURES:
+                    continue
+
                 current_val = self.devices_db.get_state(entity_id, feature_name)
-                
+
                 # Если значения нет, проверяем обязательность и инициализируем дефолтным
                 if current_val is None:
                     is_required = feature.get('required', False)
-                    
+
                     # Специальная обработка для датчиков (sensor_temp):
                     # Игнорируем флаг required для температуры и влажности, если их нет в БД.
                     # Это нужно, чтобы не отправлять humidity для чистого датчика температуры и наоборот.
