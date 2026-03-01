@@ -1,9 +1,23 @@
 import json
 import os
+import re
 from logger import log_info, log_error
 
-VERSION = '2.0.9'
 base_dir = os.path.dirname(os.path.abspath(__file__))
+
+def _read_version_from_yaml():
+    try:
+        yaml_path = os.path.abspath(os.path.join(base_dir, '..', '..', 'config.yaml'))
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+        m = re.search(r'^\s*version:\s*["\']?([^"\']+)', text, re.MULTILINE)
+        if m:
+            return m.group(1).strip()
+    except Exception:
+        pass
+    return os.environ.get('MQTT_SBERGATE_VERSION', 'unknown')
+
+VERSION = _read_version_from_yaml()
 
 # В Home Assistant конфигурация аддона (options.json) всегда находится в /data
 # Остальные файлы (devices.json) также лучше хранить в /data для персистентности

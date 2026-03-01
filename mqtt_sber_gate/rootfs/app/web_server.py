@@ -7,6 +7,7 @@ import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from logger import log_info, log_error, log_warning, log_debug
 import sber_api
+from config import VERSION
 
 MIME_TYPES = {
     ".html": "text/html",
@@ -220,7 +221,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             '/api/v1/models': self.handle_api_models,
             '/api/v1/categories': self.handle_api_categories,
             '/api/v1/devices': self.handle_api_devices_get,
-            '/api/v2/devices': self.handle_api_v2_devices_get
+            '/api/v2/devices': self.handle_api_v2_devices_get,
+            '/api/version': lambda: self.send_json_response({'version': VERSION})
         }
         
         handler = routes.get(self.path)

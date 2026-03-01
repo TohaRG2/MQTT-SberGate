@@ -35,11 +35,15 @@ class HAEntityUpdater:
 
         log_deeptrace(f"Обновление {domain}: {entity_id} '{friendly_name}' ({device_class})")
 
+        existing = self.device_database.get_device(entity_id)
+
         update_data = {
             'entity_ha': True,
-            'entity_type': config['entity_type'],
+            # Сохраняем entity_type и category, выставленные пользователем вручную.
+            # Автоматически определённые значения применяются только при первом появлении устройства.
+            'entity_type': (existing or {}).get('entity_type') or config['entity_type'],
+            'category':    (existing or {}).get('category')    or config['category'],
             'friendly_name': friendly_name,
-            'category': config['category']
         }
         if device_class:
             update_data['device_class'] = device_class
