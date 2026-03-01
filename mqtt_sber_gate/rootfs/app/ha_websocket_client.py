@@ -143,11 +143,15 @@ class HAWebSocketClient:
                 continue
 
             device_id = entity.get('device_id')
-            area_id = (
+
+            # Приоритет: area_id самого объекта > area_id устройства
+            entity_area_id = entity.get('area_id')
+            device_area_id = (
                 self.devices_registry[device_id].get('area_id')
                 if device_id and device_id in self.devices_registry
-                else entity.get('area_id')
+                else None
             )
+            area_id = entity_area_id or device_area_id
             room_name = self.areas_registry.get(area_id, '') if area_id else ''
 
             if device_id != db_entity.get('device_id'):
